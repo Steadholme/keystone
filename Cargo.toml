@@ -38,6 +38,10 @@ thiserror = "2"
 # Structured logging.
 tracing = "0.1"
 tracing-subscriber = "0.3"
+# Portable PostgreSQL data layer. Runtime queries only (sqlx::query/Row) — NO compile-time
+# query!/query_as! macros, so the build needs NO database. rustls TLS (no native-tls/openssl).
+# PgPool + parameterized standard SQL. Later runs unchanged on FusionDB over pgwire.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 
 [dev-dependencies]
 # ServiceExt::oneshot drives the Router in-process for the end-to-end contract test (no port binding).
