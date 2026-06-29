@@ -12,6 +12,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
+use crate::audit::AuditEvent;
 use crate::auth;
 use crate::error::AppError;
 use crate::{jwt, now_secs, pkce, AppState};
@@ -88,6 +89,13 @@ pub async fn token(
             .or_else(|| basic.as_ref().map(|(_, secret)| secret.as_str()));
         let ok = matches!(presented, Some(secret) if auth::verify_password(secret, secret_hash));
         if !ok {
+            // Confidential client presented a bad/missing secret. Audit the client_id only.
+            state.audit.emit(AuditEvent::warning(
+                "client_auth.failure",
+                &effective_client_id,
+                "token_endpoint",
+                "invalid client credentials",
+            ));
             return Err(AppError::InvalidClientAuth(
                 "invalid client credentials".to_string(),
             ));
@@ -150,6 +158,14 @@ pub async fn token(
         auth_code.nonce.clone(),
     )
     .map_err(|e| AppError::Internal(format!("sign id_token: {e}")))?;
+
+    // Tokens minted — audit the issuance (subject + client_id; no token material).
+    state.audit.emit(AuditEvent::info(
+        "token.issue",
+        &auth_code.sub,
+        &auth_code.client_id,
+        "access + id token issued",
+    ));
 
     Ok(Json(TokenResponse {
         access_token,

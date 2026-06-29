@@ -10,6 +10,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
+use crate::audit::AuditEvent;
 use crate::auth;
 use crate::error::AppError;
 use crate::store::{new_opaque_code, AuthCode};
@@ -91,6 +92,13 @@ pub async fn authorize(
 
     // 6. Mint + store a single-use, bound authorization code.
     let code = new_opaque_code();
+    // Audit the grant (subject + client_id; never the code/challenge).
+    state.audit.emit(AuditEvent::info(
+        "authorize.grant",
+        &sub,
+        &params.client_id,
+        "authorization code issued",
+    ));
     state.store.put_code(AuthCode {
         code: code.clone(),
         client_id: params.client_id.clone(),

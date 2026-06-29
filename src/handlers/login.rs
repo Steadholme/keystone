@@ -9,6 +9,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
 
+use crate::audit::AuditEvent;
 use crate::auth;
 use crate::AppState;
 
@@ -78,6 +79,13 @@ pub async fn login_submit(
         .unwrap_or(false);
 
     if !verified {
+        // Audit the denial: submitted username + a fixed reason only — NEVER the password.
+        state.audit.emit(AuditEvent::warning(
+            "login.failure",
+            &form.username,
+            "password",
+            "invalid credentials",
+        ));
         return reject_login(
             &return_to,
             &form.username,
@@ -85,8 +93,14 @@ pub async fn login_submit(
         );
     }
 
-    let sub = user.expect("verified implies user present").sub;
-    let cookie = auth::create_session(&state, &sub);
+    let user = user.expect("verified implies user present");
+    let cookie = auth::create_session(&state, &user.sub);
+    state.audit.emit(AuditEvent::info(
+        "login.success",
+        &user.email,
+        "password",
+        "password login",
+    ));
     redirect(
         &return_to,
         &[
@@ -119,6 +133,17 @@ pub async fn logout(
 ) -> Response {
     if !auth::verify_csrf(&headers, &form.csrf_token) {
         return redirect("/account", &[]);
+    }
+    // Audit the logout with the user's email (best-effort) before tearing the session down.
+    if let Some(session) = auth::current_session(&state, &headers) {
+        let actor = state
+            .store
+            .get_user(&session.user_sub)
+            .map(|u| u.email)
+            .unwrap_or(session.user_sub);
+        state
+            .audit
+            .emit(AuditEvent::info("session.logout", &actor, "session", "logged out"));
     }
     auth::destroy_session(&state, &headers);
     redirect(

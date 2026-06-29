@@ -64,6 +64,9 @@ curl -s http://127.0.0.1:8080/jwks.json | jq .
 | `INTERNAL_TLS_KEY` | 服务端私钥 PEM 路径 | 无（开 mTLS 时必填） |
 | `INTERNAL_TLS_CLIENT_CA` | 客户端 CA PEM 路径（Keyward `root.crt`），用于校验 Sluice 的客户端证书 | 无（开 mTLS 时必填） |
 | `INTERNAL_HEALTH_ADDR` | 明文回环健康监听地址（供 docker healthcheck，无需客户端证书） | `127.0.0.1:8081` |
+| `AUDIT_ENABLED` | 审计事件发射开关，`on`/`true`/`1`/`yes` 启用（其余/未设 = 关闭，行为不变） | 关闭 |
+| `WATCHTOWER_URL` | Watchtower 审计入库基址（内部明文）；发射器在其后追加 `/events` | `http://watchtower:8500` |
+| `AUDIT_INGEST_TOKEN` | Watchtower 入库 bearer token（`Authorization: Bearer …`）。**永不写日志、永不入字段**；未设置则即便 `AUDIT_ENABLED=on` 也保持关闭 | 无 |
 
 > 在 docker-compose 中，规范 issuer 为网络内服务名 `http://keystone:8080`：将 `ISSUER=http://keystone:8080`、`BIND_ADDR=0.0.0.0:8080` 即可让 Keystone 把该值嵌入 JWT 并在发现文档中对外广播，Sluice 据此拉取 discovery / JWKS 并校验 `iss`。
 
@@ -198,6 +201,30 @@ docker run --rm -e KEYSTONE_STORE=memory -e INTERNAL_TLS=on \
 curl --cacert tls/ca.crt --cert tls/client.crt --key tls/client.key \
   --resolve keystone:8443:127.0.0.1 https://keystone:8443/healthz
 ```
+
+## 审计事件发射（keystone → Watchtower，env 开关，默认关闭）
+
+把安全相关动作以**非阻塞、即发即弃（fire-and-forget）**的方式发射到 Watchtower 的不可篡改哈希链审计脊柱。**默认关闭**——不设 `AUDIT_ENABLED` 时为**空操作（no-op）**：不建通道、不起 worker、行为与此前完全一致。
+
+**绝对约束：** 发射审计事件**绝不**阻塞、拖慢或失败认证请求路径。`AuditSink`（位于 `AppState`）持有一个**有界** `tokio::mpsc` 通道（容量 `1024`）；处理器用 `try_send` 入队后立即返回——队列满或 worker 已退出则**丢弃**该事件（warn + 丢弃计数器），**绝不**把错误传播给用户请求。一个后台 worker 排空通道，对每个事件向 `WATCHTOWER_URL/events` 发起带 `Authorization: Bearer AUDIT_INGEST_TOKEN` 的 POST，单次预算 **2s** 超时。**Watchtower 宕机不会影响登录或令牌签发。** 目标是内部明文 `http://watchtower:8500`，故采用**手写 HTTP/1.1**（`tokio` 裸 TCP，复刻 `main` 中依赖最小的 healthcheck 探针），**不引入** TLS 客户端 / openssl。
+
+**无机密泄露：** 事件只携带共享逻辑字段 `actor` / `action` / `target` / `severity` / `detail` / `source`（`source` 恒为 `keystone`，seq/ts/hash 由 Watchtower 赋予）。**绝不**写入口令、token、client secret、完整 cookie、`code_verifier` 或签名材料；`login.failure` 只记录**提交的用户名 + 固定原因**（`"invalid credentials"`，**永不**含口令）。唯一上线的凭据是 `Authorization` 头里的 bearer token（不作为字段）。
+
+已埋点的事件（`source="keystone"`）：
+
+| action | actor | target | severity | 触发点 |
+|--------|-------|--------|----------|--------|
+| `login.success` | 用户 email | `password` | info | 口令登录成功（`POST /login`） |
+| `login.failure` | 提交的用户名 | `password` | warning | 口令校验失败（`detail="invalid credentials"`） |
+| `webauthn.authenticate.success` | 用户 email | 凭据 id | info | passkey 登录成功 |
+| `webauthn.authenticate.failure` | `anonymous` | `passkey` | warning | passkey 断言校验失败 |
+| `webauthn.register` | 用户 email | 凭据 id（公开） | info | passkey 注册完成 |
+| `token.issue` | 用户 sub | client_id | info | `/token` 成功签发 |
+| `authorize.grant` | 用户 sub | client_id | info | `/authorize` 为会话签发授权码 |
+| `client_auth.failure` | client_id | `token_endpoint` | warning | 机密客户端 secret 错误/缺失 |
+| `session.logout` | 用户 email | `session` | info | `POST /logout` |
+
+> 开启方式（compose）：在 keystone 服务环境中设 `AUDIT_ENABLED=on`、`WATCHTOWER_URL=http://watchtower:8500`、`AUDIT_INGEST_TOKEN=${AUDIT_INGEST_TOKEN}`（与 `deploy/.env` 中同名值一致）。关闭时零行为变化，现有测试全绿。
 
 ## 关键设计
 
