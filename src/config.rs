@@ -33,6 +33,12 @@ pub const DEFAULT_RP_ORIGIN: &str = "https://id.w33d.xyz";
 /// Dev/test default session secret. Production MUST override via `SESSION_SECRET`.
 pub const DEFAULT_SESSION_SECRET: &str = "keystone-dev-session-secret-change-me";
 
+/// Default internal mTLS listen address (`INTERNAL_TLS_ADDR`) when `INTERNAL_TLS=on`.
+pub const DEFAULT_INTERNAL_TLS_ADDR: &str = "0.0.0.0:8443";
+/// Default plaintext loopback health listener (`INTERNAL_HEALTH_ADDR`) used by the
+/// docker HEALTHCHECK when internal mTLS is on (so the probe needs no client cert).
+pub const DEFAULT_INTERNAL_HEALTH_ADDR: &str = "127.0.0.1:8081";
+
 /// Runtime configuration. `bind_addr` and `issuer` follow the shared dev contract.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -70,6 +76,22 @@ pub struct Config {
     pub gw_client_secret: Option<String>,
     /// Gateway client redirect URI (`GW_REDIRECT_URI`).
     pub gw_redirect_uri: String,
+    /// Internal mTLS toggle (`INTERNAL_TLS=on`). Default OFF — plain HTTP on `bind_addr`
+    /// exactly as today. When ON, Keystone serves the app over mTLS on
+    /// `internal_tls_addr` and a plaintext health listener on `internal_health_addr`.
+    pub internal_tls: bool,
+    /// mTLS listen address (`INTERNAL_TLS_ADDR`, default `0.0.0.0:8443`).
+    pub internal_tls_addr: String,
+    /// Server certificate PEM path (`INTERNAL_TLS_CERT`, Keyward-issued, CN/SAN=keystone).
+    pub internal_tls_cert: Option<String>,
+    /// Server private key PEM path (`INTERNAL_TLS_KEY`).
+    pub internal_tls_key: Option<String>,
+    /// Client-CA PEM path (`INTERNAL_TLS_CLIENT_CA`, Keyward `root.crt`) used to verify
+    /// the client certificate presented by Sluice.
+    pub internal_tls_client_ca: Option<String>,
+    /// Plaintext loopback health listen address (`INTERNAL_HEALTH_ADDR`,
+    /// default `127.0.0.1:8081`) for the docker HEALTHCHECK when mTLS is on.
+    pub internal_health_addr: String,
 }
 
 impl Config {
@@ -91,6 +113,12 @@ impl Config {
             gw_client_id: DEFAULT_GW_CLIENT_ID.to_string(),
             gw_client_secret: None,
             gw_redirect_uri: DEFAULT_GW_REDIRECT_URI.to_string(),
+            internal_tls: false,
+            internal_tls_addr: DEFAULT_INTERNAL_TLS_ADDR.to_string(),
+            internal_tls_cert: None,
+            internal_tls_key: None,
+            internal_tls_client_ca: None,
+            internal_health_addr: DEFAULT_INTERNAL_HEALTH_ADDR.to_string(),
         }
     }
 
@@ -129,6 +157,19 @@ impl Config {
         config.gw_client_secret = env_nonempty("GW_CLIENT_SECRET");
         if let Some(v) = env_nonempty("GW_REDIRECT_URI") {
             config.gw_redirect_uri = v;
+        }
+        // Internal mTLS (default OFF). Only `on` (case-insensitive) enables it.
+        config.internal_tls = std::env::var("INTERNAL_TLS")
+            .map(|v| v.eq_ignore_ascii_case("on"))
+            .unwrap_or(false);
+        if let Some(v) = env_nonempty("INTERNAL_TLS_ADDR") {
+            config.internal_tls_addr = v;
+        }
+        config.internal_tls_cert = env_nonempty("INTERNAL_TLS_CERT");
+        config.internal_tls_key = env_nonempty("INTERNAL_TLS_KEY");
+        config.internal_tls_client_ca = env_nonempty("INTERNAL_TLS_CLIENT_CA");
+        if let Some(v) = env_nonempty("INTERNAL_HEALTH_ADDR") {
+            config.internal_health_addr = v;
         }
         config
     }

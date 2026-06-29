@@ -54,6 +54,20 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 # HMAC-SHA256 over the opaque session id, keyed by SESSION_SECRET, so a tampered
 # `__Host-session` cookie is rejected before any store lookup (defense in depth).
 hmac = "0.12"
+# Internal mTLS server (env-toggled, default OFF) for the keystone<->sluice hop.
+# rustls is PINNED to the `ring` provider (passed explicitly to the ServerConfig /
+# client-verifier builders) to MATCH the provider sqlx already compiles — this avoids
+# pulling aws-lc-rs (which needs cmake/clang at build time) and avoids the "two
+# providers, ambiguous default" panic.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+# Load server cert chain + private key + client-CA roots from PEM (no openssl).
+rustls-pemfile = "2"
+# Serve the axum app over the rustls TLS stream (HTTP/1.1) via hyper's low-level conn.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+# `tower_service::Service` trait to drive the axum Router from the manual accept loop.
+tower-service = "0.3"
 
 [dev-dependencies]
 # ServiceExt::oneshot drives the Router in-process for the end-to-end contract test (no port binding).

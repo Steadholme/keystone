@@ -12,6 +12,7 @@ pub mod jwt;
 pub mod keys;
 pub mod pkce;
 pub mod store;
+pub mod tls;
 pub mod webauthn;
 
 use std::sync::Arc;
