@@ -39,6 +39,10 @@ pub const DEFAULT_INTERNAL_TLS_ADDR: &str = "0.0.0.0:8443";
 /// docker HEALTHCHECK when internal mTLS is on (so the probe needs no client cert).
 pub const DEFAULT_INTERNAL_HEALTH_ADDR: &str = "127.0.0.1:8081";
 
+/// Default Watchtower audit-ingest base URL (`WATCHTOWER_URL`). Internal-only plaintext
+/// hop for v0; `/events` is appended by the emitter.
+pub const DEFAULT_WATCHTOWER_URL: &str = "http://watchtower:8500";
+
 /// Runtime configuration. `bind_addr` and `issuer` follow the shared dev contract.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -92,6 +96,15 @@ pub struct Config {
     /// Plaintext loopback health listen address (`INTERNAL_HEALTH_ADDR`,
     /// default `127.0.0.1:8081`) for the docker HEALTHCHECK when mTLS is on.
     pub internal_health_addr: String,
+    /// Audit emitter toggle (`AUDIT_ENABLED`). Default OFF — the audit sink is a no-op and
+    /// behavior is unchanged. When ON (with a token + URL) auth events are fire-and-forget
+    /// emitted to Watchtower.
+    pub audit_enabled: bool,
+    /// Watchtower audit-ingest base URL (`WATCHTOWER_URL`, default `http://watchtower:8500`).
+    pub watchtower_url: String,
+    /// Watchtower ingest bearer token (`AUDIT_INGEST_TOKEN`). When `None`, audit stays
+    /// disabled even if `AUDIT_ENABLED=on`. Never logged.
+    pub audit_ingest_token: Option<String>,
 }
 
 impl Config {
@@ -119,6 +132,9 @@ impl Config {
             internal_tls_key: None,
             internal_tls_client_ca: None,
             internal_health_addr: DEFAULT_INTERNAL_HEALTH_ADDR.to_string(),
+            audit_enabled: false,
+            watchtower_url: DEFAULT_WATCHTOWER_URL.to_string(),
+            audit_ingest_token: None,
         }
     }
 
@@ -171,6 +187,22 @@ impl Config {
         if let Some(v) = env_nonempty("INTERNAL_HEALTH_ADDR") {
             config.internal_health_addr = v;
         }
+        // Audit emitter (default OFF). Enabled by `on`/`true`/`1`/`yes` (case-insensitive);
+        // anything else (incl. unset) keeps it off so existing tests/dev are unchanged.
+        config.audit_enabled = std::env::var("AUDIT_ENABLED")
+            .map(|v| {
+                let v = v.trim();
+                v.eq_ignore_ascii_case("on")
+                    || v.eq_ignore_ascii_case("true")
+                    || v == "1"
+                    || v.eq_ignore_ascii_case("yes")
+            })
+            .unwrap_or(false);
+        if let Some(v) = env_nonempty("WATCHTOWER_URL") {
+            config.watchtower_url = v;
+        }
+        // Never logged; only the bearer header to Watchtower carries it.
+        config.audit_ingest_token = env_nonempty("AUDIT_INGEST_TOKEN");
         config
     }
 

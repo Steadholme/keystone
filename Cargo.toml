@@ -16,8 +16,9 @@ path = "src/main.rs"
 [dependencies]
 # Contract-specified HTTP framework (Query/Form/State extractors, Json/redirect responses).
 axum = "0.8"
-# Async runtime axum runs on.
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Async runtime axum runs on. `net`/`io-util`/`time`/`sync` back the non-blocking audit
+# emitter (bounded mpsc + background worker + hand-rolled HTTP/1.1 POST to Watchtower).
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
 # RS256 sign/verify. rust_crypto = pure-Rust provider; this pin is load-bearing:
 # omitting it makes jsonwebtoken 10 panic at runtime ("Could not determine CryptoProvider").
 jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }

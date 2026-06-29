@@ -4,6 +4,7 @@
 //! provides [`build_dev_state`] (seeded store + generated signing key). The
 //! integration test consumes [`app`] directly via `tower::oneshot`.
 
+pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod error;
@@ -22,6 +23,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use webauthn_rs::Webauthn;
 
+use crate::audit::AuditSink;
 use crate::config::Config;
 use crate::keys::SigningKey;
 use crate::store::{InMemoryStore, PgStore, Store};
@@ -34,6 +36,9 @@ pub struct AppState {
     pub keys: Arc<SigningKey>,
     /// WebAuthn relying party (rp_id / rp_origin), shared read-only.
     pub webauthn: Arc<Webauthn>,
+    /// Non-blocking, fire-and-forget audit emitter -> Watchtower. Disabled (no-op) by
+    /// default; enabled when `AUDIT_ENABLED` is on with a `WATCHTOWER_URL` + ingest token.
+    pub audit: AuditSink,
 }
 
 /// Build the router wiring the OIDC contract endpoints + the login surface onto `state`.
@@ -93,6 +98,8 @@ pub fn build_dev_state() -> AppState {
         store: Arc::new(store),
         keys: Arc::new(SigningKey::generate()),
         webauthn: Arc::new(webauthn),
+        // Dev/test default: audit OFF (no-op sink) — unchanged behavior.
+        audit: AuditSink::disabled(),
     }
 }
 
@@ -201,11 +208,20 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
         "WebAuthn relying party ready"
     );
 
+    // Non-blocking audit emitter. Built from config BEFORE `config` is moved into the Arc.
+    // When AUDIT_ENABLED is off (default) this is a no-op sink and nothing is spawned.
+    let audit = AuditSink::start(
+        config.audit_enabled,
+        &config.watchtower_url,
+        config.audit_ingest_token.as_deref(),
+    );
+
     Ok(AppState {
         config: Arc::new(config),
         store,
         keys: Arc::new(keys),
         webauthn: Arc::new(webauthn),
+        audit,
     })
 }
 
