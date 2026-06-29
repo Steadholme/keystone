@@ -40,6 +40,13 @@ pub struct LogoutForm {
     pub csrf_token: String,
 }
 
+/// `GET /` — bare root: 302 to `/account`. `/account` itself bounces to `/login`
+/// when there is no session, so this is the single convenience entry point:
+/// signed-in -> `/account`, signed-out -> `/account` -> `/login`.
+pub async fn root_redirect() -> Response {
+    redirect("/account", &[])
+}
+
 /// `GET /login` — render the form (or bounce to the target if already signed in).
 pub async fn login_page(
     State(state): State<AppState>,

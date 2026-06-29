@@ -55,6 +55,7 @@ pub fn app(state: AppState) -> Router {
         .route("/token", post(handlers::token::token))
         .route("/userinfo", get(handlers::userinfo::userinfo))
         // --- Login surface ---
+        .route("/", get(handlers::login::root_redirect))
         .route(
             "/login",
             get(handlers::login::login_page).post(handlers::login::login_submit),

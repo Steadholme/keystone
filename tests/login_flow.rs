@@ -99,6 +99,16 @@ fn token_request(code: &str) -> Request<Body> {
 }
 
 #[tokio::test]
+async fn root_redirects_to_account() {
+    let state = keystone::build_dev_state();
+    // Bare root is a convenience entry point: 302 -> /account (which itself
+    // bounces to /login when there is no session).
+    let (status, headers, _) = call(&state, get("/")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(location(&headers), "/account");
+}
+
+#[tokio::test]
 async fn authorize_without_session_redirects_to_login() {
     let state = keystone::build_dev_state();
 
