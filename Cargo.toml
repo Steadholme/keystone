@@ -18,7 +18,12 @@ path = "src/main.rs"
 axum = "0.8"
 # Async runtime axum runs on. `net`/`io-util`/`time`/`sync` back the non-blocking audit
 # emitter (bounded mpsc + background worker + hand-rolled HTTP/1.1 POST to Watchtower).
+# The `Store` trait is async: handlers `.await` it directly and PgStore drives sqlx natively,
+# so a worker thread is NEVER blocked on a DB round-trip (no sync-over-async bridge).
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
+# Erase the async `Store` trait methods so `Arc<dyn Store>` stays object-safe (the handlers
+# depend only on the trait — same seam Watchtower/Keyward use).
+async-trait = "0.1"
 # RS256 sign/verify. rust_crypto = pure-Rust provider; this pin is load-bearing:
 # omitting it makes jsonwebtoken 10 panic at runtime ("Could not determine CryptoProvider").
 jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }

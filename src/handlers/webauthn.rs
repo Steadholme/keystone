@@ -59,18 +59,20 @@ pub async fn register_begin(
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     check_csrf(&headers)?;
-    let session = auth::current_session(&state, &headers).ok_or_else(|| {
+    let session = auth::current_session(&state, &headers).await.ok_or_else(|| {
         AppError::Unauthorized("login required to register a passkey".to_string())
     })?;
     let user = state
         .store
         .get_user(&session.user_sub)
+        .await
         .ok_or_else(|| AppError::Internal("session user not found".to_string()))?;
 
     // Exclude already-registered credentials so the authenticator won't double-enroll.
     let exclude: Vec<_> = state
         .store
         .list_credentials(&user.sub)
+        .await
         .iter()
         .filter_map(|c| serde_json::from_str::<Passkey>(&c.passkey).ok())
         .map(|pk| pk.cred_id().clone())
@@ -90,12 +92,15 @@ pub async fn register_begin(
     let state_json =
         serde_json::to_string(&reg_state).map_err(|e| AppError::Internal(e.to_string()))?;
     let state_id = crate::store::new_opaque_code();
-    state.store.put_state(WebauthnState {
-        id: state_id.clone(),
-        kind: KIND_REG.to_string(),
-        state: state_json,
-        expires_at: now_secs() + auth::WA_STATE_TTL,
-    });
+    state
+        .store
+        .put_state(WebauthnState {
+            id: state_id.clone(),
+            kind: KIND_REG.to_string(),
+            state: state_json,
+            expires_at: now_secs() + auth::WA_STATE_TTL,
+        })
+        .await;
 
     json_with_cookies(ccr, &[auth::wa_state_cookie(&state_id)])
 }
@@ -106,11 +111,11 @@ pub async fn register_finish(
     Json(cred): Json<RegisterPublicKeyCredential>,
 ) -> Result<Response, AppError> {
     check_csrf(&headers)?;
-    let session = auth::current_session(&state, &headers).ok_or_else(|| {
+    let session = auth::current_session(&state, &headers).await.ok_or_else(|| {
         AppError::Unauthorized("login required to register a passkey".to_string())
     })?;
 
-    let reg_state: PasskeyRegistration = take_ceremony(&state, &headers, KIND_REG)?;
+    let reg_state: PasskeyRegistration = take_ceremony(&state, &headers, KIND_REG).await?;
     let passkey = state
         .webauthn
         .finish_passkey_registration(&cred, &reg_state)
@@ -123,14 +128,18 @@ pub async fn register_finish(
     let actor = state
         .store
         .get_user(&session.user_sub)
+        .await
         .map(|u| u.email)
         .unwrap_or_else(|| session.user_sub.clone());
-    state.store.put_credential(Credential {
-        cred_id: cred_id.clone(),
-        user_sub: session.user_sub,
-        passkey: passkey_json,
-        created_at: now_secs(),
-    });
+    state
+        .store
+        .put_credential(Credential {
+            cred_id: cred_id.clone(),
+            user_sub: session.user_sub,
+            passkey: passkey_json,
+            created_at: now_secs(),
+        })
+        .await;
     // Audit the registration with the public credential id (safe to record).
     state.audit.emit(AuditEvent::info(
         "webauthn.register",
@@ -155,11 +164,13 @@ pub async fn authenticate_begin(
     let user = state
         .store
         .get_user_by_username(&body.username)
+        .await
         .ok_or_else(|| AppError::InvalidRequest("no passkeys for that user".to_string()))?;
 
     let passkeys: Vec<Passkey> = state
         .store
         .list_credentials(&user.sub)
+        .await
         .iter()
         .filter_map(|c| serde_json::from_str::<Passkey>(&c.passkey).ok())
         .collect();
@@ -177,12 +188,15 @@ pub async fn authenticate_begin(
     let state_json =
         serde_json::to_string(&auth_state).map_err(|e| AppError::Internal(e.to_string()))?;
     let state_id = crate::store::new_opaque_code();
-    state.store.put_state(WebauthnState {
-        id: state_id.clone(),
-        kind: KIND_AUTH.to_string(),
-        state: state_json,
-        expires_at: now_secs() + auth::WA_STATE_TTL,
-    });
+    state
+        .store
+        .put_state(WebauthnState {
+            id: state_id.clone(),
+            kind: KIND_AUTH.to_string(),
+            state: state_json,
+            expires_at: now_secs() + auth::WA_STATE_TTL,
+        })
+        .await;
 
     json_with_cookies(rcr, &[auth::wa_state_cookie(&state_id)])
 }
@@ -193,7 +207,7 @@ pub async fn authenticate_finish(
     Json(cred): Json<PublicKeyCredential>,
 ) -> Result<Response, AppError> {
     check_csrf(&headers)?;
-    let auth_state: PasskeyAuthentication = take_ceremony(&state, &headers, KIND_AUTH)?;
+    let auth_state: PasskeyAuthentication = take_ceremony(&state, &headers, KIND_AUTH).await?;
 
     let result = match state
         .webauthn
@@ -217,6 +231,7 @@ pub async fn authenticate_finish(
     let stored = state
         .store
         .get_credential(&cred_id)
+        .await
         .ok_or_else(|| AppError::Unauthorized("unknown credential".to_string()))?;
 
     // Bump the stored signature counter when the authenticator advanced it.
@@ -224,7 +239,10 @@ pub async fn authenticate_finish(
         if let Ok(mut pk) = serde_json::from_str::<Passkey>(&stored.passkey) {
             if pk.update_credential(&result).is_some() {
                 if let Ok(updated) = serde_json::to_string(&pk) {
-                    state.store.update_credential_passkey(&cred_id, &updated);
+                    state
+                        .store
+                        .update_credential_passkey(&cred_id, &updated)
+                        .await;
                 }
             }
         }
@@ -234,9 +252,10 @@ pub async fn authenticate_finish(
     let actor = state
         .store
         .get_user(&stored.user_sub)
+        .await
         .map(|u| u.email)
         .unwrap_or_else(|| stored.user_sub.clone());
-    let session_cookie = auth::create_session(&state, &stored.user_sub);
+    let session_cookie = auth::create_session(&state, &stored.user_sub).await;
     state.audit.emit(AuditEvent::info(
         "webauthn.authenticate.success",
         &actor,
@@ -255,7 +274,7 @@ pub async fn authenticate_finish(
 
 /// Consume the in-flight ceremony state referenced by the `__Host-wa` cookie, check its
 /// kind + expiry, and deserialize it into `T`.
-fn take_ceremony<T: for<'de> Deserialize<'de>>(
+async fn take_ceremony<T: for<'de> Deserialize<'de>>(
     state: &AppState,
     headers: &HeaderMap,
     kind: &str,
@@ -265,6 +284,7 @@ fn take_ceremony<T: for<'de> Deserialize<'de>>(
     let row = state
         .store
         .take_state(&state_id)
+        .await
         .ok_or_else(|| AppError::InvalidRequest("ceremony state expired or missing".to_string()))?;
     if row.kind != kind || now_secs() > row.expires_at {
         return Err(AppError::InvalidRequest(

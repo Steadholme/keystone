@@ -232,8 +232,8 @@ curl --cacert tls/ca.crt --cert tls/client.crt --key tls/client.key \
   `rsa 0.9` 生成密钥，`EncodingKey::from_rsa_der`（PKCS#1 DER）签名，
   `DecodingKey::from_rsa_components(n, e)` 验签——这正是 Sluice 从 JWKS 验签所走的同一路径，
   因此集成测试本身就证明了两服务的互操作。
-- **存储是可插拔的 `Store` trait**：方法 `get_client / get_user / put_code / take_code`（原子单次消费），handler 不接触任何具体存储类型。
-  现有两套实现：默认 `InMemoryStore`（`Mutex<HashMap>`）与可移植的 `PgStore`（sqlx + Postgres）；后者在同步 trait 方法内经 `block_in_place` 桥接到 async sqlx（生产 `#[tokio::main]` 与 `multi_thread` 集成测试均满足多线程运行时要求）。
+- **存储是可插拔的 `async Store` trait**（`async-trait`）：方法 `get_client / get_user / put_code / take_code`（原子单次消费），handler 不接触任何具体存储类型，直接在服务运行时上 `.await` 存储方法。
+  现有两套实现：默认 `InMemoryStore`（`Mutex<HashMap>`，临界区全同步、锁守卫不跨 `.await`）与可移植的 `PgStore`（sqlx + Postgres）；后者原生 `.await` sqlx，不再用 `block_in_place`/`Handle::block_on` 同步桥接，因此 DB 往返永不阻塞 worker 线程。
 - **PKCE S256 强制**：`/authorize` 缺少 `code_challenge` 或 `code_challenge_method != S256` 一律 400；
   `/token` 重算 `base64url(sha256(verifier))` 与存储的 challenge 比对。无 plaintext PKCE，无 implicit/hybrid。
 - 授权码为 32 字节 CSPRNG 不透明值，单次使用，60s TTL，绑定 `client_id + redirect_uri + code_challenge + sub + nonce + scope`。

@@ -9,8 +9,8 @@
 //!   cargo test --test pg_store -- --nocapture
 //! ```
 //!
-//! Requires a multi-threaded runtime: the synchronous `Store` trait bridges to async
-//! sqlx via `block_in_place`, which only works on the multi_thread scheduler.
+//! Uses a multi-threaded runtime (matching production); the `Store` trait is async, so the
+//! handlers `.await` sqlx natively with no sync-over-async bridge.
 
 use std::sync::Arc;
 
@@ -55,56 +55,72 @@ async fn pg_store_full_integration() {
     let mut state = keystone::build_dev_state();
     state.store = Arc::new(pg);
 
-    // --- direct Store-trait round-trip (sync methods over async sqlx) ------
+    // --- direct Store-trait round-trip (async methods over async sqlx) -----
     let client = state
         .store
         .get_client(CLIENT_ID)
+        .await
         .expect("seeded client present");
     assert_eq!(client.client_id, CLIENT_ID);
     assert!(
         client.allows_redirect(REDIRECT_URI),
         "redirect URI seeded into child table"
     );
-    assert!(state.store.get_client("ghost").is_none(), "unknown client");
+    assert!(
+        state.store.get_client("ghost").await.is_none(),
+        "unknown client"
+    );
 
     let user = state
         .store
         .get_user("u_admin")
+        .await
         .expect("seeded user present");
     assert_eq!(user.email, "admin@holdfast.local");
-    assert!(state.store.get_user("nobody").is_none(), "unknown user");
+    assert!(
+        state.store.get_user("nobody").await.is_none(),
+        "unknown user"
+    );
 
     // put_code -> take_code, and single-use (delete-on-consume) enforcement.
     let code = new_opaque_code();
-    state.store.put_code(AuthCode {
-        code: code.clone(),
-        client_id: CLIENT_ID.to_string(),
-        redirect_uri: REDIRECT_URI.to_string(),
-        scope: "openid email".to_string(),
-        nonce: Some("n-direct".to_string()),
-        code_challenge: CHALLENGE.to_string(),
-        sub: "u_admin".to_string(),
-        expires_at: now_secs() + 60,
-        used: false,
-    });
-    let taken = state.store.take_code(&code).expect("code present once");
+    state
+        .store
+        .put_code(AuthCode {
+            code: code.clone(),
+            client_id: CLIENT_ID.to_string(),
+            redirect_uri: REDIRECT_URI.to_string(),
+            scope: "openid email".to_string(),
+            nonce: Some("n-direct".to_string()),
+            code_challenge: CHALLENGE.to_string(),
+            sub: "u_admin".to_string(),
+            expires_at: now_secs() + 60,
+            used: false,
+        })
+        .await;
+    let taken = state
+        .store
+        .take_code(&code)
+        .await
+        .expect("code present once");
     assert_eq!(taken.client_id, CLIENT_ID);
     assert_eq!(taken.redirect_uri, REDIRECT_URI);
     assert_eq!(taken.code_challenge, CHALLENGE);
     assert_eq!(taken.nonce.as_deref(), Some("n-direct"));
     assert_eq!(taken.scope, "openid email");
     assert!(
-        state.store.take_code(&code).is_none(),
+        state.store.take_code(&code).await.is_none(),
         "single-use: a consumed code is gone"
     );
 
     // --- login-layer tables round-trip on real Postgres --------------------
     // password hash: set + read back via username lookup (sub OR email).
     let hash = keystone::auth::hash_password("pg-bootstrap-pass").unwrap();
-    state.store.set_password_hash("u_admin", &hash);
+    state.store.set_password_hash("u_admin", &hash).await;
     let by_email = state
         .store
         .get_user_by_username("admin@holdfast.local")
+        .await
         .expect("lookup by email");
     assert_eq!(by_email.sub, "u_admin");
     assert_eq!(by_email.password_hash.as_deref(), Some(hash.as_str()));
@@ -123,14 +139,14 @@ async fn pg_store_full_integration() {
         created_at: now_secs(),
         expires_at: now_secs() + 3600,
     };
-    state.store.put_session(sess.clone());
+    state.store.put_session(sess.clone()).await;
     assert_eq!(
-        state.store.get_session(&sess.id).map(|s| s.user_sub),
+        state.store.get_session(&sess.id).await.map(|s| s.user_sub),
         Some("u_admin".to_string())
     );
-    state.store.delete_session(&sess.id);
+    state.store.delete_session(&sess.id).await;
     assert!(
-        state.store.get_session(&sess.id).is_none(),
+        state.store.get_session(&sess.id).await.is_none(),
         "session deleted"
     );
 
@@ -141,17 +157,18 @@ async fn pg_store_full_integration() {
         passkey: r#"{"v":1}"#.to_string(),
         created_at: now_secs(),
     };
-    state.store.put_credential(cred.clone());
-    assert_eq!(state.store.list_credentials("u_admin").len(), 1);
+    state.store.put_credential(cred.clone()).await;
+    assert_eq!(state.store.list_credentials("u_admin").await.len(), 1);
     assert_eq!(
-        state.store.get_credential("cred-pg-1").map(|c| c.passkey),
+        state.store.get_credential("cred-pg-1").await.map(|c| c.passkey),
         Some(r#"{"v":1}"#.to_string())
     );
     state
         .store
-        .update_credential_passkey("cred-pg-1", r#"{"v":2}"#);
+        .update_credential_passkey("cred-pg-1", r#"{"v":2}"#)
+        .await;
     assert_eq!(
-        state.store.get_credential("cred-pg-1").map(|c| c.passkey),
+        state.store.get_credential("cred-pg-1").await.map(|c| c.passkey),
         Some(r#"{"v":2}"#.to_string()),
         "counter/passkey update persisted"
     );
@@ -163,14 +180,15 @@ async fn pg_store_full_integration() {
         state: r#"{"reg":true}"#.to_string(),
         expires_at: now_secs() + 300,
     };
-    state.store.put_state(wstate.clone());
+    state.store.put_state(wstate.clone()).await;
     let taken = state
         .store
         .take_state(&wstate.id)
+        .await
         .expect("state present once");
     assert_eq!(taken.kind, "reg");
     assert!(
-        state.store.take_state(&wstate.id).is_none(),
+        state.store.take_state(&wstate.id).await.is_none(),
         "single-use: ceremony state is consumed"
     );
 
@@ -251,7 +269,7 @@ async fn authorize_ok(state: &AppState) -> (String, String) {
          &code_challenge_method=S256&nonce=n-abc"
     );
     // `/authorize` now gates on a session; establish one for the seeded admin.
-    let session_cookie = keystone::auth::create_session(state, "u_admin");
+    let session_cookie = keystone::auth::create_session(state, "u_admin").await;
     let req = Request::builder()
         .uri(uri)
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))

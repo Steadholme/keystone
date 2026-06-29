@@ -87,7 +87,7 @@ pub fn app(state: AppState) -> Router {
 pub fn build_dev_state() -> AppState {
     let config = Config::dev();
     let store = InMemoryStore::new();
-    store.put_client(config::seed_client());
+    store.seed_client(config::seed_client());
     store.put_user(config::seed_user());
 
     let webauthn = webauthn::build(&config.webauthn_rp_id, &config.webauthn_rp_origin)
@@ -136,7 +136,7 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
         }
         "memory" => {
             let mem = InMemoryStore::new();
-            mem.put_client(config::seed_client());
+            mem.seed_client(config::seed_client());
             mem.put_user(config::seed_user());
             Arc::new(mem)
         }
@@ -151,11 +151,11 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
     // has no password hash yet, hash it (Argon2id) and UPSERT it. Idempotent across
     // restarts — once a hash exists we never overwrite it from the env.
     if let Some(password) = config.bootstrap_admin_password.as_deref() {
-        match store.get_user(config::SEED_USER_SUB) {
+        match store.get_user(config::SEED_USER_SUB).await {
             Some(user) if user.password_hash.is_none() => {
                 let hash = auth::hash_password(password)
                     .map_err(|e| format!("hash bootstrap admin password: {e}"))?;
-                store.set_password_hash(config::SEED_USER_SUB, &hash);
+                store.set_password_hash(config::SEED_USER_SUB, &hash).await;
                 tracing::info!(sub = %config::SEED_USER_SUB, "bootstrap admin password applied");
             }
             Some(_) => {
@@ -173,7 +173,7 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
     if let Some(secret) = config.gw_client_secret.as_deref() {
         let hash = auth::hash_password(secret)
             .map_err(|e| format!("hash gateway client secret: {e}"))?;
-        store.put_client(config::gw_client(&config, hash));
+        store.put_client(config::gw_client(&config, hash)).await;
         tracing::info!(
             client_id = %config.gw_client_id,
             redirect_uri = %config.gw_redirect_uri,

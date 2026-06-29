@@ -113,7 +113,7 @@ async fn authorize_without_session_redirects_to_login() {
     );
 
     // With a session -> 302 straight back to the redirect_uri with a code.
-    let session = keystone::auth::create_session(&state, "u_admin");
+    let session = keystone::auth::create_session(&state, "u_admin").await;
     let (status, headers, _) = call(
         &state,
         get_with_cookie(&authorize_uri(), &format!("__Host-session={session}")),
@@ -130,7 +130,7 @@ async fn password_login_creates_session_then_oidc_flow() {
     let state = keystone::build_dev_state();
     // Seed the admin password (mirrors the BOOTSTRAP_ADMIN_PASSWORD startup path).
     let hash = keystone::auth::hash_password(PASSWORD).unwrap();
-    state.store.set_password_hash("u_admin", &hash);
+    state.store.set_password_hash("u_admin", &hash).await;
 
     // 1. GET /login -> obtain a CSRF cookie/token.
     let (status, headers, _) = call(&state, get("/login")).await;
@@ -188,7 +188,7 @@ async fn password_login_creates_session_then_oidc_flow() {
 async fn login_with_wrong_password_is_rejected_no_session() {
     let state = keystone::build_dev_state();
     let hash = keystone::auth::hash_password(PASSWORD).unwrap();
-    state.store.set_password_hash("u_admin", &hash);
+    state.store.set_password_hash("u_admin", &hash).await;
 
     let (_, headers, _) = call(&state, get("/login")).await;
     let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
@@ -214,7 +214,7 @@ async fn login_with_wrong_password_is_rejected_no_session() {
 async fn login_without_csrf_is_rejected() {
     let state = keystone::build_dev_state();
     let hash = keystone::auth::hash_password(PASSWORD).unwrap();
-    state.store.set_password_hash("u_admin", &hash);
+    state.store.set_password_hash("u_admin", &hash).await;
 
     // Submit a CSRF token in the form but DO NOT send the matching cookie.
     let body = format!(

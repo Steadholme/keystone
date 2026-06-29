@@ -43,6 +43,7 @@ pub async fn authorize(
     let client = state
         .store
         .get_client(&params.client_id)
+        .await
         .ok_or_else(|| AppError::InvalidClient("unknown client_id".to_string()))?;
 
     // 2. EXACT redirect_uri match. Do NOT redirect to an unregistered URI.
@@ -78,7 +79,7 @@ pub async fn authorize(
     //    the full /authorize request (path + query) as a same-origin return_to so the
     //    user lands back here after authenticating. Auto-consent for the first-party
     //    seeded client is fine for v0.
-    let sub = match auth::current_session(&state, &headers) {
+    let sub = match auth::current_session(&state, &headers).await {
         Some(session) => session.user_sub,
         None => {
             let return_to = original_uri
@@ -99,17 +100,20 @@ pub async fn authorize(
         &params.client_id,
         "authorization code issued",
     ));
-    state.store.put_code(AuthCode {
-        code: code.clone(),
-        client_id: params.client_id.clone(),
-        redirect_uri: params.redirect_uri.clone(),
-        scope: params.scope.clone(),
-        nonce: params.nonce.clone(),
-        code_challenge,
-        sub,
-        expires_at: now_secs() + state.config.code_ttl,
-        used: false,
-    });
+    state
+        .store
+        .put_code(AuthCode {
+            code: code.clone(),
+            client_id: params.client_id.clone(),
+            redirect_uri: params.redirect_uri.clone(),
+            scope: params.scope.clone(),
+            nonce: params.nonce.clone(),
+            code_challenge,
+            sub,
+            expires_at: now_secs() + state.config.code_ttl,
+            used: false,
+        })
+        .await;
 
     // 7. 302 back to redirect_uri with code (+ state, preserved verbatim).
     let mut location = format!("{}?code={}", params.redirect_uri, code);

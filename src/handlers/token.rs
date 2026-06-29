@@ -78,6 +78,7 @@ pub async fn token(
     let client = state
         .store
         .get_client(&effective_client_id)
+        .await
         .ok_or_else(|| AppError::InvalidClient("unknown client_id".to_string()))?;
 
     // Confidential clients MUST present a valid secret (constant-time Argon2id verify).
@@ -107,6 +108,7 @@ pub async fn token(
     let auth_code = state
         .store
         .take_code(&params.code)
+        .await
         .ok_or_else(|| AppError::InvalidGrant("unknown or already-used code".to_string()))?;
 
     // Expiry.
@@ -135,6 +137,7 @@ pub async fn token(
     let user = state
         .store
         .get_user(&auth_code.sub)
+        .await
         .ok_or_else(|| AppError::Internal("approved subject not found".to_string()))?;
 
     let access_token = jwt::sign_access(

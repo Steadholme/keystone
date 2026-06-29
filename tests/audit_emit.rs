@@ -43,7 +43,7 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 async fn login_failure_is_prompt_with_unreachable_audit_sink() {
     let state = keystone::build_dev_state();
     let hash = keystone::auth::hash_password(PASSWORD).unwrap();
-    state.store.set_password_hash("u_admin", &hash);
+    state.store.set_password_hash("u_admin", &hash).await;
 
     // Audit ON, aimed at a non-routable address. The background worker may stall on connect,
     // but the request path uses `try_send` and must never wait on it.

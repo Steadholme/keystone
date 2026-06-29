@@ -103,36 +103,39 @@ pub fn verify_signed(secret: &str, value: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Create + persist a session for `user_sub`; returns the signed cookie value.
-pub fn create_session(state: &AppState, user_sub: &str) -> String {
+pub async fn create_session(state: &AppState, user_sub: &str) -> String {
     let id = new_opaque_code();
     let now = now_secs();
-    state.store.put_session(Session {
-        id: id.clone(),
-        user_sub: user_sub.to_string(),
-        created_at: now,
-        expires_at: now + state.config.session_ttl,
-    });
+    state
+        .store
+        .put_session(Session {
+            id: id.clone(),
+            user_sub: user_sub.to_string(),
+            created_at: now,
+            expires_at: now + state.config.session_ttl,
+        })
+        .await;
     signed_value(&state.config.session_secret, &id)
 }
 
 /// Resolve the current (unexpired) session from the request cookies, if any.
 /// Expired sessions are deleted as a side effect.
-pub fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Session> {
+pub async fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Session> {
     let raw = get_cookie(headers, SESSION_COOKIE)?;
     let id = verify_signed(&state.config.session_secret, &raw)?;
-    let session = state.store.get_session(&id)?;
+    let session = state.store.get_session(&id).await?;
     if now_secs() > session.expires_at {
-        state.store.delete_session(&id);
+        state.store.delete_session(&id).await;
         return None;
     }
     Some(session)
 }
 
 /// Destroy the session referenced by the request cookie (logout). Best-effort.
-pub fn destroy_session(state: &AppState, headers: &HeaderMap) {
+pub async fn destroy_session(state: &AppState, headers: &HeaderMap) {
     if let Some(raw) = get_cookie(headers, SESSION_COOKIE) {
         if let Some(id) = verify_signed(&state.config.session_secret, &raw) {
-            state.store.delete_session(&id);
+            state.store.delete_session(&id).await;
         }
     }
 }

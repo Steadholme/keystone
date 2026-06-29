@@ -35,15 +35,18 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, HeaderMap, V
 }
 
 /// Seed a confidential client (Argon2id-hashed secret) into the dev store.
-fn state_with_confidential_client() -> AppState {
+async fn state_with_confidential_client() -> AppState {
     let state = keystone::build_dev_state();
     let hash = keystone::auth::hash_password(GW_SECRET).unwrap();
-    state.store.put_client(Client {
-        client_id: GW_CLIENT_ID.to_string(),
-        redirect_uris: vec![GW_REDIRECT.to_string()],
-        name: "gw".to_string(),
-        client_secret_hash: Some(hash),
-    });
+    state
+        .store
+        .put_client(Client {
+            client_id: GW_CLIENT_ID.to_string(),
+            redirect_uris: vec![GW_REDIRECT.to_string()],
+            name: "gw".to_string(),
+            client_secret_hash: Some(hash),
+        })
+        .await;
     state
 }
 
@@ -54,7 +57,7 @@ async fn authorize_code(state: &AppState, client_id: &str, redirect_uri: &str) -
          &scope=openid+email+profile&state=xyz&code_challenge={CHALLENGE}\
          &code_challenge_method=S256&nonce=n-gw"
     );
-    let session_cookie = keystone::auth::create_session(state, "u_admin");
+    let session_cookie = keystone::auth::create_session(state, "u_admin").await;
     let req = Request::builder()
         .uri(uri)
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))
@@ -107,7 +110,7 @@ fn token_basic(code: &str, redirect_uri: &str, client_id: &str, secret: &str) ->
 
 #[tokio::test]
 async fn confidential_client_secret_post_success_and_nonce_roundtrips() {
-    let state = state_with_confidential_client();
+    let state = state_with_confidential_client().await;
     let code = authorize_code(&state, GW_CLIENT_ID, GW_REDIRECT).await;
 
     let (status, _, body) = call(
@@ -137,7 +140,7 @@ async fn confidential_client_secret_post_success_and_nonce_roundtrips() {
 
 #[tokio::test]
 async fn confidential_client_secret_basic_success() {
-    let state = state_with_confidential_client();
+    let state = state_with_confidential_client().await;
     let code = authorize_code(&state, GW_CLIENT_ID, GW_REDIRECT).await;
     let (status, _, _) = call(&state, token_basic(&code, GW_REDIRECT, GW_CLIENT_ID, GW_SECRET)).await;
     assert_eq!(status, StatusCode::OK, "HTTP Basic correct secret -> 200");
@@ -145,7 +148,7 @@ async fn confidential_client_secret_basic_success() {
 
 #[tokio::test]
 async fn confidential_client_wrong_and_missing_secret_is_401() {
-    let state = state_with_confidential_client();
+    let state = state_with_confidential_client().await;
     let code = authorize_code(&state, GW_CLIENT_ID, GW_REDIRECT).await;
 
     // Wrong secret -> 401 invalid_client. Client auth runs BEFORE the code is consumed.
@@ -190,7 +193,7 @@ async fn public_client_still_redeems_with_pkce_only() {
 
 #[tokio::test]
 async fn confidential_client_basic_and_body_client_id_mismatch_is_401() {
-    let state = state_with_confidential_client();
+    let state = state_with_confidential_client().await;
     let code = authorize_code(&state, GW_CLIENT_ID, GW_REDIRECT).await;
     // Body client_id = sluice-dev but Basic client_id = sluice-gw -> mismatch 401.
     let basic = BASE64_STANDARD.encode(format!("{GW_CLIENT_ID}:{GW_SECRET}"));

@@ -47,7 +47,7 @@ pub async fn login_page(
     Query(q): Query<LoginQuery>,
 ) -> Response {
     let return_to = sanitize_return_to(q.return_to.as_deref());
-    if auth::current_session(&state, &headers).is_some() {
+    if auth::current_session(&state, &headers).await.is_some() {
         return redirect(&return_to, &[]);
     }
     let csrf = auth::new_csrf_token();
@@ -71,7 +71,7 @@ pub async fn login_submit(
         );
     }
 
-    let user = state.store.get_user_by_username(&form.username);
+    let user = state.store.get_user_by_username(&form.username).await;
     let verified = user
         .as_ref()
         .and_then(|u| u.password_hash.as_deref())
@@ -94,7 +94,7 @@ pub async fn login_submit(
     }
 
     let user = user.expect("verified implies user present");
-    let cookie = auth::create_session(&state, &user.sub);
+    let cookie = auth::create_session(&state, &user.sub).await;
     state.audit.emit(AuditEvent::info(
         "login.success",
         &user.email,
@@ -112,14 +112,14 @@ pub async fn login_submit(
 
 /// `GET /account` — session-required; shows the user + passkey/logout controls.
 pub async fn account_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(session) = auth::current_session(&state, &headers) else {
+    let Some(session) = auth::current_session(&state, &headers).await else {
         return redirect("/login", &[]);
     };
-    let Some(user) = state.store.get_user(&session.user_sub) else {
-        auth::destroy_session(&state, &headers);
+    let Some(user) = state.store.get_user(&session.user_sub).await else {
+        auth::destroy_session(&state, &headers).await;
         return redirect("/login", &[auth::clear_cookie(auth::SESSION_COOKIE)]);
     };
-    let count = state.store.list_credentials(&user.sub).len();
+    let count = state.store.list_credentials(&user.sub).await.len();
     let csrf = auth::new_csrf_token();
     let body = render_account(&csrf, &user.sub, &user.email, count);
     html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)])
@@ -135,17 +135,18 @@ pub async fn logout(
         return redirect("/account", &[]);
     }
     // Audit the logout with the user's email (best-effort) before tearing the session down.
-    if let Some(session) = auth::current_session(&state, &headers) {
+    if let Some(session) = auth::current_session(&state, &headers).await {
         let actor = state
             .store
             .get_user(&session.user_sub)
+            .await
             .map(|u| u.email)
             .unwrap_or(session.user_sub);
         state
             .audit
             .emit(AuditEvent::info("session.logout", &actor, "session", "logged out"));
     }
-    auth::destroy_session(&state, &headers);
+    auth::destroy_session(&state, &headers).await;
     redirect(
         "/login",
         &[

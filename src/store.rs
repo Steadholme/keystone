@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use async_trait::async_trait;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::rngs::OsRng;
@@ -99,37 +100,41 @@ pub struct AuthCode {
     pub used: bool,
 }
 
-/// Pluggable storage. No `.await` is ever held across the internal lock.
+/// Pluggable storage. Methods are `async`: the axum handlers `.await` them directly on the
+/// serving runtime, so a DB round-trip never blocks a worker thread. The in-memory impl holds
+/// its `std::sync::Mutex` guards only across synchronous critical sections (no `.await` inside),
+/// so a guard is never held across a yield point.
+#[async_trait]
 pub trait Store: Send + Sync {
-    fn get_client(&self, client_id: &str) -> Option<Client>;
+    async fn get_client(&self, client_id: &str) -> Option<Client>;
     /// Insert or replace a client (incl. its redirect URIs + optional secret hash).
     /// Idempotent UPSERT — used to seed the confidential gateway client at startup.
-    fn put_client(&self, client: Client);
-    fn get_user(&self, sub: &str) -> Option<User>;
+    async fn put_client(&self, client: Client);
+    async fn get_user(&self, sub: &str) -> Option<User>;
     /// Resolve a user by login name: matches the subject id OR the email (exact).
-    fn get_user_by_username(&self, username: &str) -> Option<User>;
+    async fn get_user_by_username(&self, username: &str) -> Option<User>;
     /// Set (or replace) a user's Argon2 password hash.
-    fn set_password_hash(&self, sub: &str, hash: &str);
+    async fn set_password_hash(&self, sub: &str, hash: &str);
 
-    fn put_code(&self, code: AuthCode);
+    async fn put_code(&self, code: AuthCode);
     /// Atomically remove and return the code (single-use consume); `None` if absent.
-    fn take_code(&self, code: &str) -> Option<AuthCode>;
+    async fn take_code(&self, code: &str) -> Option<AuthCode>;
 
-    fn put_session(&self, session: Session);
-    fn get_session(&self, id: &str) -> Option<Session>;
-    fn delete_session(&self, id: &str);
+    async fn put_session(&self, session: Session);
+    async fn get_session(&self, id: &str) -> Option<Session>;
+    async fn delete_session(&self, id: &str);
 
-    fn put_credential(&self, cred: Credential);
+    async fn put_credential(&self, cred: Credential);
     /// All passkeys registered to a user (for authentication + exclude lists).
-    fn list_credentials(&self, user_sub: &str) -> Vec<Credential>;
+    async fn list_credentials(&self, user_sub: &str) -> Vec<Credential>;
     /// One credential by its id (resolves the owning user during passwordless auth).
-    fn get_credential(&self, cred_id: &str) -> Option<Credential>;
+    async fn get_credential(&self, cred_id: &str) -> Option<Credential>;
     /// Replace a credential's serialised passkey (counter update after each auth).
-    fn update_credential_passkey(&self, cred_id: &str, passkey: &str);
+    async fn update_credential_passkey(&self, cred_id: &str, passkey: &str);
 
-    fn put_state(&self, state: WebauthnState);
+    async fn put_state(&self, state: WebauthnState);
     /// Atomically remove and return ceremony state (single-use); `None` if absent.
-    fn take_state(&self, id: &str) -> Option<WebauthnState>;
+    async fn take_state(&self, id: &str) -> Option<WebauthnState>;
 }
 
 /// In-memory `Store`. `std::sync::Mutex<HashMap>` — no async lock needed.
@@ -155,10 +160,24 @@ impl InMemoryStore {
             .expect("users lock poisoned")
             .insert(user.sub.clone(), user);
     }
+
+    /// Seed a client (startup only). Inherent + synchronous (parallel to [`Self::put_user`])
+    /// so the sync `build_dev_state` constructor can populate the in-memory store without
+    /// entering the async `Store` trait. Runtime / `Arc<dyn Store>` paths use the trait method.
+    pub fn seed_client(&self, client: Client) {
+        self.clients
+            .lock()
+            .expect("clients lock poisoned")
+            .insert(client.client_id.clone(), client);
+    }
 }
 
+// The `std::sync::Mutex` guards below are fine under `#[async_trait]`: every critical section
+// is fully synchronous (no `.await` inside), so a guard is never held across a yield point and
+// the generated futures stay `Send`.
+#[async_trait]
 impl Store for InMemoryStore {
-    fn get_client(&self, client_id: &str) -> Option<Client> {
+    async fn get_client(&self, client_id: &str) -> Option<Client> {
         self.clients
             .lock()
             .expect("clients lock poisoned")
@@ -166,14 +185,14 @@ impl Store for InMemoryStore {
             .cloned()
     }
 
-    fn put_client(&self, client: Client) {
+    async fn put_client(&self, client: Client) {
         self.clients
             .lock()
             .expect("clients lock poisoned")
             .insert(client.client_id.clone(), client);
     }
 
-    fn get_user(&self, sub: &str) -> Option<User> {
+    async fn get_user(&self, sub: &str) -> Option<User> {
         self.users
             .lock()
             .expect("users lock poisoned")
@@ -181,7 +200,7 @@ impl Store for InMemoryStore {
             .cloned()
     }
 
-    fn get_user_by_username(&self, username: &str) -> Option<User> {
+    async fn get_user_by_username(&self, username: &str) -> Option<User> {
         self.users
             .lock()
             .expect("users lock poisoned")
@@ -190,31 +209,31 @@ impl Store for InMemoryStore {
             .cloned()
     }
 
-    fn set_password_hash(&self, sub: &str, hash: &str) {
+    async fn set_password_hash(&self, sub: &str, hash: &str) {
         if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
             user.password_hash = Some(hash.to_string());
         }
     }
 
-    fn put_code(&self, code: AuthCode) {
+    async fn put_code(&self, code: AuthCode) {
         self.codes
             .lock()
             .expect("codes lock poisoned")
             .insert(code.code.clone(), code);
     }
 
-    fn take_code(&self, code: &str) -> Option<AuthCode> {
+    async fn take_code(&self, code: &str) -> Option<AuthCode> {
         self.codes.lock().expect("codes lock poisoned").remove(code)
     }
 
-    fn put_session(&self, session: Session) {
+    async fn put_session(&self, session: Session) {
         self.sessions
             .lock()
             .expect("sessions lock poisoned")
             .insert(session.id.clone(), session);
     }
 
-    fn get_session(&self, id: &str) -> Option<Session> {
+    async fn get_session(&self, id: &str) -> Option<Session> {
         self.sessions
             .lock()
             .expect("sessions lock poisoned")
@@ -222,21 +241,21 @@ impl Store for InMemoryStore {
             .cloned()
     }
 
-    fn delete_session(&self, id: &str) {
+    async fn delete_session(&self, id: &str) {
         self.sessions
             .lock()
             .expect("sessions lock poisoned")
             .remove(id);
     }
 
-    fn put_credential(&self, cred: Credential) {
+    async fn put_credential(&self, cred: Credential) {
         self.credentials
             .lock()
             .expect("credentials lock poisoned")
             .insert(cred.cred_id.clone(), cred);
     }
 
-    fn list_credentials(&self, user_sub: &str) -> Vec<Credential> {
+    async fn list_credentials(&self, user_sub: &str) -> Vec<Credential> {
         self.credentials
             .lock()
             .expect("credentials lock poisoned")
@@ -246,7 +265,7 @@ impl Store for InMemoryStore {
             .collect()
     }
 
-    fn get_credential(&self, cred_id: &str) -> Option<Credential> {
+    async fn get_credential(&self, cred_id: &str) -> Option<Credential> {
         self.credentials
             .lock()
             .expect("credentials lock poisoned")
@@ -254,7 +273,7 @@ impl Store for InMemoryStore {
             .cloned()
     }
 
-    fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
+    async fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
         if let Some(cred) = self
             .credentials
             .lock()
@@ -265,14 +284,14 @@ impl Store for InMemoryStore {
         }
     }
 
-    fn put_state(&self, state: WebauthnState) {
+    async fn put_state(&self, state: WebauthnState) {
         self.states
             .lock()
             .expect("states lock poisoned")
             .insert(state.id.clone(), state);
     }
 
-    fn take_state(&self, id: &str) -> Option<WebauthnState> {
+    async fn take_state(&self, id: &str) -> Option<WebauthnState> {
         self.states.lock().expect("states lock poisoned").remove(id)
     }
 }
@@ -287,43 +306,32 @@ impl Store for InMemoryStore {
 // `INSERT ... ON CONFLICT`, and a child table (`client_redirect_uris`) instead of an
 // array/JSON column. Single-use codes/states are enforced by delete-on-consume.
 //
-// The `Store` trait is intentionally synchronous (handlers never `.await` the store),
-// so each method bridges to async sqlx via `block_in_place` + the runtime `Handle`.
-// This requires a multi-threaded Tokio runtime, which production (`#[tokio::main]`)
-// and the `multi_thread` integration tests both provide.
+// The `Store` trait is async, so each method drives sqlx natively and the handlers `.await`
+// it on the serving runtime — there is NO `block_in_place` and NO sync-over-async bridge, so a
+// DB round-trip never blocks a worker thread.
 
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
 
-/// PostgreSQL-backed [`Store`]. Holds a `PgPool` plus the runtime [`Handle`] used to
-/// drive async queries to completion from the synchronous trait methods.
-///
-/// [`Handle`]: tokio::runtime::Handle
+/// PostgreSQL-backed [`Store`]. Holds a `PgPool`; the async trait methods drive sqlx natively,
+/// so no worker thread is ever blocked on a DB round-trip.
 pub struct PgStore {
     pool: PgPool,
-    handle: tokio::runtime::Handle,
 }
 
 impl PgStore {
-    /// Open a pooled connection. Captures the current runtime handle for the
-    /// sync→async bridge; must be called from within a Tokio runtime.
+    /// Open a pooled connection. Async; call from within a Tokio runtime.
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
         let pool = PgPoolOptions::new()
             .max_connections(8)
             .connect(database_url)
             .await?;
-        Ok(Self {
-            pool,
-            handle: tokio::runtime::Handle::current(),
-        })
+        Ok(Self { pool })
     }
 
     /// Construct from an existing pool (used by tests that share a pool).
     pub fn from_pool(pool: PgPool) -> Self {
-        Self {
-            pool,
-            handle: tokio::runtime::Handle::current(),
-        }
+        Self { pool }
     }
 
     /// Idempotent, portable migrations. Standard SQL only — safe to run on every startup.
@@ -439,12 +447,6 @@ impl PgStore {
         .execute(&self.pool)
         .await?;
         Ok(())
-    }
-
-    /// Drive an async DB op to completion from a synchronous trait method.
-    /// `block_in_place` releases the worker so the runtime keeps making progress.
-    fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
-        tokio::task::block_in_place(|| self.handle.block_on(fut))
     }
 
     async fn get_client_async(&self, client_id: &str) -> Result<Option<Client>, sqlx::Error> {
@@ -740,116 +742,118 @@ impl PgStore {
     }
 }
 
+#[async_trait]
 impl Store for PgStore {
-    fn get_client(&self, client_id: &str) -> Option<Client> {
-        self.block_on(self.get_client_async(client_id))
+    async fn get_client(&self, client_id: &str) -> Option<Client> {
+        self.get_client_async(client_id)
+            .await
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "pg get_client failed");
                 None
             })
     }
 
-    fn put_client(&self, client: Client) {
-        if let Err(e) = self.block_on(self.put_client_async(&client)) {
+    async fn put_client(&self, client: Client) {
+        if let Err(e) = self.put_client_async(&client).await {
             tracing::error!(error = %e, "pg put_client failed");
         }
     }
 
-    fn get_user(&self, sub: &str) -> Option<User> {
-        self.block_on(self.get_user_async(sub)).unwrap_or_else(|e| {
+    async fn get_user(&self, sub: &str) -> Option<User> {
+        self.get_user_async(sub).await.unwrap_or_else(|e| {
             tracing::error!(error = %e, "pg get_user failed");
             None
         })
     }
 
-    fn get_user_by_username(&self, username: &str) -> Option<User> {
-        self.block_on(self.get_user_by_username_async(username))
+    async fn get_user_by_username(&self, username: &str) -> Option<User> {
+        self.get_user_by_username_async(username)
+            .await
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "pg get_user_by_username failed");
                 None
             })
     }
 
-    fn set_password_hash(&self, sub: &str, hash: &str) {
-        if let Err(e) = self.block_on(self.set_password_hash_async(sub, hash)) {
+    async fn set_password_hash(&self, sub: &str, hash: &str) {
+        if let Err(e) = self.set_password_hash_async(sub, hash).await {
             tracing::error!(error = %e, "pg set_password_hash failed");
         }
     }
 
-    fn put_code(&self, code: AuthCode) {
-        if let Err(e) = self.block_on(self.put_code_async(&code)) {
+    async fn put_code(&self, code: AuthCode) {
+        if let Err(e) = self.put_code_async(&code).await {
             tracing::error!(error = %e, "pg put_code failed");
         }
     }
 
-    fn take_code(&self, code: &str) -> Option<AuthCode> {
-        self.block_on(self.take_code_async(code))
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "pg take_code failed");
-                None
-            })
+    async fn take_code(&self, code: &str) -> Option<AuthCode> {
+        self.take_code_async(code).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg take_code failed");
+            None
+        })
     }
 
-    fn put_session(&self, session: Session) {
-        if let Err(e) = self.block_on(self.put_session_async(&session)) {
+    async fn put_session(&self, session: Session) {
+        if let Err(e) = self.put_session_async(&session).await {
             tracing::error!(error = %e, "pg put_session failed");
         }
     }
 
-    fn get_session(&self, id: &str) -> Option<Session> {
-        self.block_on(self.get_session_async(id))
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "pg get_session failed");
-                None
-            })
+    async fn get_session(&self, id: &str) -> Option<Session> {
+        self.get_session_async(id).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg get_session failed");
+            None
+        })
     }
 
-    fn delete_session(&self, id: &str) {
-        if let Err(e) = self.block_on(self.delete_session_async(id)) {
+    async fn delete_session(&self, id: &str) {
+        if let Err(e) = self.delete_session_async(id).await {
             tracing::error!(error = %e, "pg delete_session failed");
         }
     }
 
-    fn put_credential(&self, cred: Credential) {
-        if let Err(e) = self.block_on(self.put_credential_async(&cred)) {
+    async fn put_credential(&self, cred: Credential) {
+        if let Err(e) = self.put_credential_async(&cred).await {
             tracing::error!(error = %e, "pg put_credential failed");
         }
     }
 
-    fn list_credentials(&self, user_sub: &str) -> Vec<Credential> {
-        self.block_on(self.list_credentials_async(user_sub))
+    async fn list_credentials(&self, user_sub: &str) -> Vec<Credential> {
+        self.list_credentials_async(user_sub)
+            .await
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "pg list_credentials failed");
                 Vec::new()
             })
     }
 
-    fn get_credential(&self, cred_id: &str) -> Option<Credential> {
-        self.block_on(self.get_credential_async(cred_id))
+    async fn get_credential(&self, cred_id: &str) -> Option<Credential> {
+        self.get_credential_async(cred_id)
+            .await
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "pg get_credential failed");
                 None
             })
     }
 
-    fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
-        if let Err(e) = self.block_on(self.update_credential_passkey_async(cred_id, passkey)) {
+    async fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
+        if let Err(e) = self.update_credential_passkey_async(cred_id, passkey).await {
             tracing::error!(error = %e, "pg update_credential_passkey failed");
         }
     }
 
-    fn put_state(&self, state: WebauthnState) {
-        if let Err(e) = self.block_on(self.put_state_async(&state)) {
+    async fn put_state(&self, state: WebauthnState) {
+        if let Err(e) = self.put_state_async(&state).await {
             tracing::error!(error = %e, "pg put_state failed");
         }
     }
 
-    fn take_state(&self, id: &str) -> Option<WebauthnState> {
-        self.block_on(self.take_state_async(id))
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "pg take_state failed");
-                None
-            })
+    async fn take_state(&self, id: &str) -> Option<WebauthnState> {
+        self.take_state_async(id).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg take_state failed");
+            None
+        })
     }
 }
 

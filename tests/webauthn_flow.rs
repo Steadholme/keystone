@@ -65,7 +65,7 @@ async fn passkey_register_then_authenticate_end_to_end() {
     let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
 
     // --- Registration (session-protected) ----------------------------------
-    let session = keystone::auth::create_session(&state, "u_admin");
+    let session = keystone::auth::create_session(&state, "u_admin").await;
     let reg_cookie = format!("__Host-session={session}; __Host-csrf={CSRF}");
 
     let (status, headers, body) = call(
@@ -105,7 +105,7 @@ async fn passkey_register_then_authenticate_end_to_end() {
 
     // The passkey is now persisted under the user.
     assert_eq!(
-        state.store.list_credentials("u_admin").len(),
+        state.store.list_credentials("u_admin").await.len(),
         1,
         "one passkey stored"
     );

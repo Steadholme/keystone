@@ -32,6 +32,7 @@ pub async fn userinfo(
     let user = state
         .store
         .get_user(&data.claims.sub)
+        .await
         .ok_or_else(|| AppError::Unauthorized("subject not found".to_string()))?;
 
     Ok(Json(json!({
