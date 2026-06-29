@@ -28,7 +28,7 @@ cargo build
 # 运行（监听 127.0.0.1:8080）
 cargo run
 
-# 测试（默认内存存储，无需数据库 —— 17 个契约测试全绿）
+# 测试（默认内存存储，无需数据库 —— 契约/登录/机密客户端/mTLS 配置单测全绿）
 cargo test
 ```
 
@@ -55,6 +55,15 @@ curl -s http://127.0.0.1:8080/jwks.json | jq .
 | `WEBAUTHN_RP_ORIGIN` | WebAuthn relying-party origin（单一公网入口） | `https://id.w33d.xyz` |
 | `SESSION_SECRET` | `__Host-session` cookie 的 HMAC-SHA256 签名密钥；**生产必须覆盖** | dev 默认串（须替换） |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 启动时一次性为种子管理员（`u_admin`）设置 Argon2 密码哈希（仅当其尚无哈希时）。**永不写日志**；幂等（已有哈希则忽略） | 无（不设密码） |
+| `GW_CLIENT_ID` | 机密网关客户端 id（Sluice 作为带 secret 的 OIDC RP） | `sluice-gw` |
+| `GW_CLIENT_SECRET` | 机密网关客户端密钥。**设置时**才会播种该客户端（Argon2id 哈希入库，幂等 UPSERT）；不设置则不播种（默认） | 无 |
+| `GW_REDIRECT_URI` | 网关客户端回调地址 | `https://id.w33d.xyz/_gw/auth/callback` |
+| `INTERNAL_TLS` | 内部 mTLS 开关，`on` 启用（其余/未设 = 关闭，行为不变） | 关闭 |
+| `INTERNAL_TLS_ADDR` | mTLS 监听地址（`INTERNAL_TLS=on` 时） | `0.0.0.0:8443` |
+| `INTERNAL_TLS_CERT` | 服务端证书 PEM 路径（Keyward 签发，CN/SAN=`keystone`） | 无（开 mTLS 时必填） |
+| `INTERNAL_TLS_KEY` | 服务端私钥 PEM 路径 | 无（开 mTLS 时必填） |
+| `INTERNAL_TLS_CLIENT_CA` | 客户端 CA PEM 路径（Keyward `root.crt`），用于校验 Sluice 的客户端证书 | 无（开 mTLS 时必填） |
+| `INTERNAL_HEALTH_ADDR` | 明文回环健康监听地址（供 docker healthcheck，无需客户端证书） | `127.0.0.1:8081` |
 
 > 在 docker-compose 中，规范 issuer 为网络内服务名 `http://keystone:8080`：将 `ISSUER=http://keystone:8080`、`BIND_ADDR=0.0.0.0:8080` 即可让 Keystone 把该值嵌入 JWT 并在发现文档中对外广播，Sluice 据此拉取 discovery / JWKS 并校验 `iss`。
 
@@ -145,8 +154,50 @@ docker run --rm -p 8080:8080 \
 
 种子数据（seed）：
 
-- Client：`{ client_id: "sluice-dev", redirect_uris: ["http://127.0.0.1:9090/callback"] }`
+- Client（公开）：`{ client_id: "sluice-dev", redirect_uris: ["http://127.0.0.1:9090/callback", "https://id.w33d.xyz/callback"] }`
+- Client（机密，仅当设置 `GW_CLIENT_SECRET` 时）：`{ client_id: "sluice-gw", redirect_uris: ["https://id.w33d.xyz/_gw/auth/callback"], client_secret_hash: Argon2id(...) }`
 - User：`{ sub: "u_admin", email: "admin@holdfast.local" }`
+
+## 机密客户端（confidential clients）
+
+客户端分两类，由 `oauth_clients.client_secret_hash`（可空 TEXT，Argon2id PHC 串）区分：
+
+- **公开客户端（public）**：`client_secret_hash` 为 `NULL`，仅靠 **PKCE（S256）** 保护，`/token` 不需要密钥（如 `sluice-dev`）。**行为与此前完全一致。**
+- **机密客户端（confidential）**：`client_secret_hash` 非空，`/token` **必须**校验客户端所示密钥（**常数时间** Argon2id 比对），支持两种认证方式：
+  - `client_secret_post`：在表单里带 `client_id` + `client_secret`；
+  - `client_secret_basic`：`Authorization: Basic base64(client_id:client_secret)`。
+  - 两处都带 `client_id` 时**必须一致**；错误/缺失密钥 → **401 `invalid_client`**（`WWW-Authenticate: Basic`）。
+  - 客户端认证在**消费授权码之前**完成：认证失败**不会**烧毁单次授权码。
+  - PKCE 对所有客户端仍强制（机密客户端 = 机密 + PKCE 双重）。
+
+发现文档据此广播：`token_endpoint_auth_methods_supported = ["client_secret_post", "client_secret_basic", "none"]`。
+
+机密网关客户端（Sluice 作为带 secret 的 OIDC RP）从环境变量**幂等播种**：设置 `GW_CLIENT_SECRET` 后，于启动时把密钥 Argon2id 哈希并 UPSERT（`GW_CLIENT_ID` 默认 `sluice-gw`、`GW_REDIRECT_URI` 默认 `https://id.w33d.xyz/_gw/auth/callback`，scope = openid/email/profile）。`id_token` 的 `aud` = 请求方 `client_id`、`nonce`（若 `/authorize` 带上）原样回传，供 RP 校验。
+
+> 提示：HTTP Basic 中 `client_id:secret` 按 base64 编码；为避免 RFC 6749 §2.3.1 的表单编码歧义，`GW_CLIENT_SECRET` 建议使用 **URL-safe**（不含 `:` / `/` / `+` 等）的强随机串。
+
+## 内部 mTLS（keystone↔sluice，env 开关，默认关闭）
+
+为内部 keystone↔sluice 这一跳提供**双向 TLS**。**默认关闭**——不设 `INTERNAL_TLS` 时行为与此前完全一致（明文 `:8080`），失败可安全降级。
+
+`INTERNAL_TLS=on` 时：
+
+- 在 `INTERNAL_TLS_ADDR`（默认 `0.0.0.0:8443`）启用 **HTTPS** 监听，加载 **Keyward 签发**的服务端证书/私钥（`INTERNAL_TLS_CERT` / `INTERNAL_TLS_KEY`，CN/SAN=`keystone`），并**强制校验客户端证书**——校验其链到 `INTERNAL_TLS_CLIENT_CA`（Keyward `root.crt`），即 mutual TLS。同一 axum app 经此 mTLS 端口提供服务。
+- 另起一个**绑定 `127.0.0.1` 的明文健康监听**（`INTERNAL_HEALTH_ADDR`，默认 `127.0.0.1:8081`）供 docker `HEALTHCHECK`，**无需**客户端证书；内置 `keystone healthcheck` 子命令会根据 `INTERNAL_TLS` 自动探测该端口。
+- **不**绑定公共明文 `BIND_ADDR`；Sluice 仅经 mTLS `:8443` 访问 keystone。证书/路径缺失则进程 `exit 1` **显式失败**（不静默降级）。
+
+实现：`rustls` 固定 **`ring`** crypto provider（显式传入 builder，匹配 sqlx 已编译的 provider，**不引入 aws-lc-rs**、不依赖进程级默认 provider），`rustls-pemfile` 加载 PEM，`tokio-rustls` + `hyper`(http1) 提供服务。
+
+```bash
+# 本地 mTLS 冒烟（自备 CA + CN=keystone 服务端证书 + 客户端证书）
+docker run --rm -e KEYSTONE_STORE=memory -e INTERNAL_TLS=on \
+  -e INTERNAL_TLS_CERT=/tls/server.crt -e INTERNAL_TLS_KEY=/tls/server.key \
+  -e INTERNAL_TLS_CLIENT_CA=/tls/ca.crt \
+  -v "$PWD/tls":/tls:ro -p 127.0.0.1:8443:8443 holdfast/keystone:dev
+# 带客户端证书 -> 200 ok；不带 -> TLS 握手被拒（certificate required）
+curl --cacert tls/ca.crt --cert tls/client.crt --key tls/client.key \
+  --resolve keystone:8443:127.0.0.1 https://keystone:8443/healthz
+```
 
 ## 关键设计
 
@@ -168,7 +219,7 @@ docker run --rm -p 8080:8080 \
 - **登录 / Passkey / 密码兜底**：**已实现**——`/authorize` 现强制校验会话；passkey（WebAuthn）注册/认证 + Argon2 密码兜底；登录 UI 服务端渲染、JS/CSS 嵌入二进制。
 - **同意（consent）**：v0 对第一方种子客户端 `sluice-dev` 采用**自动同意**（已认证用户即放行）；多客户端的细粒度同意页延后。
 - **MFA / refresh token / social login / 密钥轮换 / HSM**：仍延后。
-- **TLS**：Keystone 绑定明文 HTTP；TLS 由 Sluice/ACME 在 `https://id.w33d.xyz` 前面终结。
+- **TLS**：对外 TLS 由 Sluice/ACME 在 `https://id.w33d.xyz` 前面终结。内部 keystone↔sluice 这一跳现支持**可选的双向 TLS（mTLS）**（`INTERNAL_TLS=on`，见上「内部 mTLS」）；**默认关闭**，关闭时仍为明文 `:8080`。
 
 ## 浏览器 passkey 手动验证（manual test recipe）
 
