@@ -22,6 +22,11 @@ pub enum AppError {
     #[error("invalid_client: {0}")]
     InvalidClient(String),
 
+    /// Confidential client failed to authenticate at `/token` (bad/missing secret).
+    /// 401 + `WWW-Authenticate: Basic` per RFC 6749 §5.2.
+    #[error("invalid_client: {0}")]
+    InvalidClientAuth(String),
+
     /// Missing/invalid Bearer access token at `/userinfo`.
     #[error("invalid_token: {0}")]
     Unauthorized(String),
@@ -32,25 +37,35 @@ pub enum AppError {
 }
 
 impl AppError {
-    fn parts(&self) -> (StatusCode, &'static str, String, bool) {
+    /// Map to (status, error code, description, optional `WWW-Authenticate` scheme).
+    fn parts(&self) -> (StatusCode, &'static str, String, Option<&'static str>) {
         match self {
             AppError::InvalidRequest(d) => {
-                (StatusCode::BAD_REQUEST, "invalid_request", d.clone(), false)
+                (StatusCode::BAD_REQUEST, "invalid_request", d.clone(), None)
             }
             AppError::InvalidGrant(d) => {
-                (StatusCode::BAD_REQUEST, "invalid_grant", d.clone(), false)
+                (StatusCode::BAD_REQUEST, "invalid_grant", d.clone(), None)
             }
             AppError::InvalidClient(d) => {
-                (StatusCode::BAD_REQUEST, "invalid_client", d.clone(), false)
+                (StatusCode::BAD_REQUEST, "invalid_client", d.clone(), None)
             }
-            AppError::Unauthorized(d) => {
-                (StatusCode::UNAUTHORIZED, "invalid_token", d.clone(), true)
-            }
+            AppError::InvalidClientAuth(d) => (
+                StatusCode::UNAUTHORIZED,
+                "invalid_client",
+                d.clone(),
+                Some("Basic"),
+            ),
+            AppError::Unauthorized(d) => (
+                StatusCode::UNAUTHORIZED,
+                "invalid_token",
+                d.clone(),
+                Some("Bearer"),
+            ),
             AppError::Internal(d) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 d.clone(),
-                false,
+                None,
             ),
         }
     }
@@ -64,10 +79,10 @@ impl IntoResponse for AppError {
             "error_description": description,
         }));
         let mut response = (status, body).into_response();
-        if www_authenticate {
+        if let Some(scheme) = www_authenticate {
             response
                 .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static(scheme));
         }
         response
     }

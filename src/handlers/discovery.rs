@@ -26,7 +26,11 @@ pub async fn openid_configuration(State(state): State<AppState>) -> Json<Value> 
         "id_token_signing_alg_values_supported": ["RS256"],
         "scopes_supported": ["openid", "email", "profile"],
         "subject_types_supported": ["public"],
-        "token_endpoint_auth_methods_supported": ["none"],
+        // `none` = public PKCE clients (e.g. sluice-dev); `client_secret_post` /
+        // `client_secret_basic` = confidential clients (e.g. the sluice-gw gateway).
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post", "client_secret_basic", "none"
+        ],
     }))
 }
 

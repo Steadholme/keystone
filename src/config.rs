@@ -18,6 +18,13 @@ pub const SEED_USER_SUB: &str = "u_admin";
 /// Seed admin email (doubles as a login username).
 pub const SEED_USER_EMAIL: &str = "admin@holdfast.local";
 
+/// Default confidential gateway client id — Sluice acting as an OIDC RP with a secret.
+pub const DEFAULT_GW_CLIENT_ID: &str = "sluice-gw";
+/// Default redirect URI for the confidential gateway's OIDC callback.
+pub const DEFAULT_GW_REDIRECT_URI: &str = "https://id.w33d.xyz/_gw/auth/callback";
+/// Display name for the confidential gateway client.
+pub const GW_CLIENT_NAME: &str = "Sluice Gateway (confidential)";
+
 /// Default WebAuthn relying-party id — the PARENT domain so passkeys work across
 /// future `*.w33d.xyz` services.
 pub const DEFAULT_RP_ID: &str = "w33d.xyz";
@@ -55,6 +62,14 @@ pub struct Config {
     /// Optional bootstrap password for the seeded admin (`BOOTSTRAP_ADMIN_PASSWORD`).
     /// Applied once at startup if the admin has no password hash yet.
     pub bootstrap_admin_password: Option<String>,
+    /// Confidential gateway client id (`GW_CLIENT_ID`, default `sluice-gw`).
+    pub gw_client_id: String,
+    /// Confidential gateway client secret (`GW_CLIENT_SECRET`). When `Some`, the gateway
+    /// client is Argon2id-hashed + seeded at startup; when `None`, no gateway client is
+    /// seeded (default — unchanged behavior).
+    pub gw_client_secret: Option<String>,
+    /// Gateway client redirect URI (`GW_REDIRECT_URI`).
+    pub gw_redirect_uri: String,
 }
 
 impl Config {
@@ -73,6 +88,9 @@ impl Config {
             session_secret: DEFAULT_SESSION_SECRET.to_string(),
             session_ttl: 8 * 60 * 60,
             bootstrap_admin_password: None,
+            gw_client_id: DEFAULT_GW_CLIENT_ID.to_string(),
+            gw_client_secret: None,
+            gw_redirect_uri: DEFAULT_GW_REDIRECT_URI.to_string(),
         }
     }
 
@@ -103,6 +121,15 @@ impl Config {
         // BOOTSTRAP_ADMIN_PASSWORD is intentionally NOT trimmed/validated here beyond
         // non-empty; it is applied once at seed time and never logged.
         config.bootstrap_admin_password = env_nonempty("BOOTSTRAP_ADMIN_PASSWORD");
+        // Confidential gateway client (Sluice as an OIDC RP). Seeded only when a secret
+        // is set; the secret is never logged.
+        if let Some(v) = env_nonempty("GW_CLIENT_ID") {
+            config.gw_client_id = v;
+        }
+        config.gw_client_secret = env_nonempty("GW_CLIENT_SECRET");
+        if let Some(v) = env_nonempty("GW_REDIRECT_URI") {
+            config.gw_redirect_uri = v;
+        }
         config
     }
 
@@ -144,6 +171,21 @@ pub fn seed_client() -> Client {
             SEED_REDIRECT_URI_PUBLIC.to_string(),
         ],
         name: "Sluice (dev)".to_string(),
+        // Public client (PKCE-only) — no secret.
+        client_secret_hash: None,
+    }
+}
+
+/// Build the CONFIDENTIAL gateway client record from config, carrying an
+/// already-hashed (Argon2id) client secret. Scopes (openid/email/profile) are not
+/// persisted on the client — they flow through `/authorize` and are echoed back —
+/// so the record only needs the id, redirect URI, name, and secret hash.
+pub fn gw_client(config: &Config, client_secret_hash: String) -> Client {
+    Client {
+        client_id: config.gw_client_id.clone(),
+        redirect_uris: vec![config.gw_redirect_uri.clone()],
+        name: GW_CLIENT_NAME.to_string(),
+        client_secret_hash: Some(client_secret_hash),
     }
 }
 

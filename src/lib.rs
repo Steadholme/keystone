@@ -157,6 +157,22 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
         }
     }
 
+    // Confidential gateway client (Sluice as an OIDC RP). Seeded ONLY when
+    // GW_CLIENT_SECRET is set: the secret is Argon2id-hashed and UPSERTed (idempotent
+    // across restarts — the env plaintext keeps verifying, and changing it in the env
+    // takes effect on the next restart). When unset, no gateway client is seeded so
+    // default behavior is unchanged.
+    if let Some(secret) = config.gw_client_secret.as_deref() {
+        let hash = auth::hash_password(secret)
+            .map_err(|e| format!("hash gateway client secret: {e}"))?;
+        store.put_client(config::gw_client(&config, hash));
+        tracing::info!(
+            client_id = %config.gw_client_id,
+            redirect_uri = %config.gw_redirect_uri,
+            "confidential gateway client seeded"
+        );
+    }
+
     // SIGNING_KEY_PATH set -> persist/reload the key so the `kid` is stable across
     // restarts (prevents the Sluice 401 gap on a Keystone restart). Unset -> ephemeral
     // key, unchanged dev/test behavior.

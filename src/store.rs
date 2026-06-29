@@ -17,18 +17,29 @@ use base64::Engine;
 use rand::rngs::OsRng;
 use rand::RngCore;
 
-/// Registered client. Public client (no secret); `redirect_uris` is an EXACT-match list.
+/// Registered client. `redirect_uris` is an EXACT-match list. `client_secret_hash`
+/// distinguishes the two client kinds:
+/// - `None`  -> PUBLIC client (PKCE-only, no secret) — e.g. `sluice-dev`. Unchanged.
+/// - `Some(_)` -> CONFIDENTIAL client: `/token` MUST verify a presented client secret
+///   against this Argon2id hash (constant-time) — e.g. the `sluice-gw` gateway RP.
 #[derive(Clone, Debug)]
 pub struct Client {
     pub client_id: String,
     pub redirect_uris: Vec<String>,
     pub name: String,
+    /// Argon2id PHC hash of the client secret. `None` = public client (no secret).
+    pub client_secret_hash: Option<String>,
 }
 
 impl Client {
     /// EXACT (not prefix) redirect_uri match — never redirect to an untrusted URI.
     pub fn allows_redirect(&self, uri: &str) -> bool {
         self.redirect_uris.iter().any(|u| u == uri)
+    }
+
+    /// A confidential client carries a secret hash and must authenticate at `/token`.
+    pub fn is_confidential(&self) -> bool {
+        self.client_secret_hash.is_some()
     }
 }
 
@@ -91,6 +102,9 @@ pub struct AuthCode {
 /// Pluggable storage. No `.await` is ever held across the internal lock.
 pub trait Store: Send + Sync {
     fn get_client(&self, client_id: &str) -> Option<Client>;
+    /// Insert or replace a client (incl. its redirect URIs + optional secret hash).
+    /// Idempotent UPSERT — used to seed the confidential gateway client at startup.
+    fn put_client(&self, client: Client);
     fn get_user(&self, sub: &str) -> Option<User>;
     /// Resolve a user by login name: matches the subject id OR the email (exact).
     fn get_user_by_username(&self, username: &str) -> Option<User>;
@@ -134,14 +148,6 @@ impl InMemoryStore {
         Self::default()
     }
 
-    /// Seed a client (startup only — concrete-type access is fine outside handlers).
-    pub fn put_client(&self, client: Client) {
-        self.clients
-            .lock()
-            .expect("clients lock poisoned")
-            .insert(client.client_id.clone(), client);
-    }
-
     /// Seed a user (startup only).
     pub fn put_user(&self, user: User) {
         self.users
@@ -158,6 +164,13 @@ impl Store for InMemoryStore {
             .expect("clients lock poisoned")
             .get(client_id)
             .cloned()
+    }
+
+    fn put_client(&self, client: Client) {
+        self.clients
+            .lock()
+            .expect("clients lock poisoned")
+            .insert(client.client_id.clone(), client);
     }
 
     fn get_user(&self, sub: &str) -> Option<User> {
@@ -323,6 +336,11 @@ impl PgStore {
         )
         .execute(&self.pool)
         .await?;
+        // Additive, idempotent column for confidential clients (Argon2id secret hash).
+        // NULL = public client (PKCE-only); older DBs predate this column.
+        sqlx::query("ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS client_secret_hash TEXT")
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS client_redirect_uris (\
                  client_id TEXT NOT NULL, \
@@ -430,12 +448,13 @@ impl PgStore {
     }
 
     async fn get_client_async(&self, client_id: &str) -> Result<Option<Client>, sqlx::Error> {
-        let row = sqlx::query("SELECT name FROM oauth_clients WHERE client_id = $1")
+        let row = sqlx::query("SELECT name, client_secret_hash FROM oauth_clients WHERE client_id = $1")
             .bind(client_id)
             .fetch_optional(&self.pool)
             .await?;
         let Some(row) = row else { return Ok(None) };
         let name: String = row.try_get("name")?;
+        let client_secret_hash: Option<String> = row.try_get("client_secret_hash")?;
         let uri_rows = sqlx::query(
             "SELECT redirect_uri FROM client_redirect_uris WHERE client_id = $1 \
              ORDER BY redirect_uri",
@@ -451,7 +470,33 @@ impl PgStore {
             client_id: client_id.to_string(),
             redirect_uris,
             name,
+            client_secret_hash,
         }))
+    }
+
+    /// Idempotent UPSERT of a client (name + secret hash) and its redirect URIs.
+    async fn put_client_async(&self, c: &Client) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO oauth_clients (client_id, name, client_secret_hash) VALUES ($1, $2, $3) \
+             ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name, \
+             client_secret_hash = EXCLUDED.client_secret_hash",
+        )
+        .bind(&c.client_id)
+        .bind(&c.name)
+        .bind(c.client_secret_hash.as_deref())
+        .execute(&self.pool)
+        .await?;
+        for uri in &c.redirect_uris {
+            sqlx::query(
+                "INSERT INTO client_redirect_uris (client_id, redirect_uri) VALUES ($1, $2) \
+                 ON CONFLICT (client_id, redirect_uri) DO NOTHING",
+            )
+            .bind(&c.client_id)
+            .bind(uri)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
     }
 
     fn user_from_row(row: &sqlx::postgres::PgRow) -> Result<User, sqlx::Error> {
@@ -702,6 +747,12 @@ impl Store for PgStore {
                 tracing::error!(error = %e, "pg get_client failed");
                 None
             })
+    }
+
+    fn put_client(&self, client: Client) {
+        if let Err(e) = self.block_on(self.put_client_async(&client)) {
+            tracing::error!(error = %e, "pg put_client failed");
+        }
     }
 
     fn get_user(&self, sub: &str) -> Option<User> {
