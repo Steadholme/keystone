@@ -1,0 +1,44 @@
+[package]
+name = "keystone"
+version = "0.1.0"
+edition = "2021"
+description = "Keystone v0 — a standards-correct OIDC/OAuth2 authorization server (authorization_code + PKCE S256)."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "keystone"
+path = "src/lib.rs"
+
+[[bin]]
+name = "keystone"
+path = "src/main.rs"
+
+[dependencies]
+# Contract-specified HTTP framework (Query/Form/State extractors, Json/redirect responses).
+axum = "0.8"
+# Async runtime axum runs on.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# RS256 sign/verify. rust_crypto = pure-Rust provider; this pin is load-bearing:
+# omitting it makes jsonwebtoken 10 panic at runtime ("Could not determine CryptoProvider").
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+# RSA-2048 keygen at startup; PKCS#1 DER feeds EncodingKey; PublicKeyParts gives n/e for the JWK.
+# MUST stay 0.9.x (0.10 is an RC that pulls rand_core 0.9 and breaks the rand 0.8 OsRng path).
+rsa = "0.9"
+# URL_SAFE_NO_PAD engine for JWK n/e, PKCE S256 challenge, and opaque auth-code encoding.
+base64 = "0.22"
+# SHA-256 for PKCE S256 verification and the RFC 7638 kid thumbprint.
+sha2 = "0.10"
+# (De)serialize request params and Claims; serialize discovery/JWKS/token/userinfo responses.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# CSPRNG (OsRng) for opaque single-use authorization codes. rand_core 0.6 lineage matches rsa 0.9.
+rand = "0.8"
+# Ergonomic error enum -> OAuth2 JSON error envelope.
+thiserror = "2"
+# Structured logging.
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+# ServiceExt::oneshot drives the Router in-process for the end-to-end contract test (no port binding).
+tower = { version = "0.5", features = ["util"] }

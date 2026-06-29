@@ -1,0 +1,14 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# Go (none yet, kept for ecosystem parity)
+/bin
+*.exe
+*.test
+*.out
+
+# Editor / OS
+.DS_Store
+*.swp
