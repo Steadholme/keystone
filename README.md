@@ -1,8 +1,13 @@
 # Keystone
 
 Keystone 是一个用 Rust（axum 0.8）实现的、符合标准的 **OIDC / OAuth2 授权服务器（Authorization Server）**。
-v0 只实现一条完整的纵向切片：`authorization_code` + **PKCE（S256，强制）** 流程，端到端可用，
+核心切片：`authorization_code` + **PKCE（S256，强制）** 流程，端到端可用，
 签发可通过自身 JWKS 验证的 **RS256** access token 与 id token。
+
+在此之上接入了**真实的登录系统**（取代早期的自动批准）：服务端会话（server-side session）+
+**Passkey（WebAuthn）** 登录，并带**密码兜底（Argon2id）**。`/authorize` 现在**强制校验会话**：无会话 →
+302 跳转 `/login?return_to=<原始 /authorize URL>`；有会话 → 为已认证用户签发授权码并回跳 `redirect_uri`。
+登录 UI 为服务端渲染（无独立前端 / 容器），JS/CSS 经 `include_str!` 嵌入二进制。
 
 ## 它是什么
 
@@ -46,6 +51,10 @@ curl -s http://127.0.0.1:8080/jwks.json | jq .
 | `KEYSTONE_STORE` | 存储后端：`memory` \| `postgres` | `memory` |
 | `DATABASE_URL` | Postgres DSN（仅 `postgres` 模式需要） | 无 |
 | `SIGNING_KEY_PATH` | RSA 签名密钥的 PEM 文件路径（PKCS#1）。设置后从该文件**加载或生成并持久化**密钥，使 `kid` 跨重启稳定；不存在则首启生成、文件权限 `0600`、自动创建父目录。**未设置**则每次启动生成临时密钥（dev/test 默认） | 无（临时密钥） |
+| `WEBAUTHN_RP_ID` | WebAuthn relying-party id。用**父域** `w33d.xyz`，使 passkey 可跨未来 `*.w33d.xyz` 子服务复用 | `w33d.xyz` |
+| `WEBAUTHN_RP_ORIGIN` | WebAuthn relying-party origin（单一公网入口） | `https://id.w33d.xyz` |
+| `SESSION_SECRET` | `__Host-session` cookie 的 HMAC-SHA256 签名密钥；**生产必须覆盖** | dev 默认串（须替换） |
+| `BOOTSTRAP_ADMIN_PASSWORD` | 启动时一次性为种子管理员（`u_admin`）设置 Argon2 密码哈希（仅当其尚无哈希时）。**永不写日志**；幂等（已有哈希则忽略） | 无（不设密码） |
 
 > 在 docker-compose 中，规范 issuer 为网络内服务名 `http://keystone:8080`：将 `ISSUER=http://keystone:8080`、`BIND_ADDR=0.0.0.0:8080` 即可让 Keystone 把该值嵌入 JWT 并在发现文档中对外广播，Sluice 据此拉取 discovery / JWKS 并校验 `iss`。
 
@@ -116,9 +125,23 @@ docker run --rm -p 8080:8080 \
 | GET | `/healthz` | 存活探针，返回 `200 "ok"` |
 | GET | `/.well-known/openid-configuration` | OIDC 发现文档 |
 | GET | `/jwks.json` | JWKS，恰好一个 RS256 公钥 |
-| GET | `/authorize` | `authorization_code` + PKCE(S256)，自动批准种子用户后 302 回跳 |
+| GET | `/authorize` | `authorization_code` + PKCE(S256)；**校验会话**：无会话 302 跳 `/login`，有会话签码并回跳 |
 | POST | `/token` | 消费单次授权码，校验 PKCE 与绑定，返回 access/id token |
 | GET | `/userinfo` | `Authorization: Bearer <access_token>`，返回 `{sub, email}` |
+| GET·POST | `/login` | 服务端渲染登录页（passkey 按钮 + 用户名/密码表单）；POST 校验 CSRF + Argon2 后建会话 |
+| GET | `/account` | 需会话：显示当前用户 + “注册 passkey” + 登出 |
+| POST | `/logout` | 校验 CSRF，销毁会话并清 cookie |
+| GET | `/static/{file}` | 嵌入式 `app.css` / `login.js`（`include_str!`，slim 镜像零缺文件） |
+| POST | `/webauthn/register/begin` · `/finish` | 需会话：开始/完成 passkey 注册，持久化 `Passkey` |
+| POST | `/webauthn/authenticate/begin` · `/finish` | 按用户名开始/完成 passkey 认证（无需密码），成功后建会话 |
+
+### 登录与会话设计
+
+- **会话**：服务端存储（`sessions` 表，可移植 SQL），`__Host-session` cookie 携带不透明 session id 并用
+  `SESSION_SECRET` 做 **HMAC-SHA256 签名**（被篡改的 cookie 在查库前即被拒）。cookie 属性：`Secure; HttpOnly; SameSite=Lax; Path=/`。
+- **密码兜底**：`users.password_hash`（可空）存 **Argon2id** PHC 串；`POST /login` 用 `username`（匹配 `sub` 或 `email`）查用户并常数时间校验。
+- **Passkey（WebAuthn）**：`webauthn-rs 0.5`，rp_id=`w33d.xyz`、rp_origin=`https://id.w33d.xyz`；in-flight ceremony state 存 `webauthn_states` 表，以短时 `__Host-wa` cookie 关联；每次认证按需 `update_credential` 递增计数器。
+- **CSRF**：所有 POST 采用 **double-submit**（`__Host-csrf` cookie ↔ 表单 `csrf_token` 字段 / fetch 的 `X-CSRF-Token` 头），常数时间比对。
 
 种子数据（seed）：
 
@@ -142,8 +165,19 @@ docker run --rm -p 8080:8080 \
 - **FusionDB 后端存储**：现已提供**可移植的 PostgreSQL 数据层**（`PgStore`，仅标准 SQL），日后可无改动迁移到 FusionDB over pgwire；但 FusionDB 本身**尚未接入**，默认仍为 `InMemoryStore`。
 - **密钥持久化**：已实现——设置 `SIGNING_KEY_PATH` 即把签名密钥持久化到 PEM 文件，`kid` 跨重启稳定（见上）。未设置时仍为临时密钥。
 - **密钥轮换 / HSM**：仍延后；`keys.rs` 标注了从 FusionDB/HSM 加载并轮换的 TODO 接缝。
-- **登录 / 同意 / Passkey / MFA / refresh token / social login**：v0 在 `/authorize` 直接自动批准种子用户
-  `u_admin`（仅限 dev），位于清晰命名的 dev 路径后，后续可在不改变 wire 契约的前提下接入。
-- **TLS**：v0 绑定明文 HTTP；TLS 由 Sluice/ACME 在前面终结（属未来接缝）。
+- **登录 / Passkey / 密码兜底**：**已实现**——`/authorize` 现强制校验会话；passkey（WebAuthn）注册/认证 + Argon2 密码兜底；登录 UI 服务端渲染、JS/CSS 嵌入二进制。
+- **同意（consent）**：v0 对第一方种子客户端 `sluice-dev` 采用**自动同意**（已认证用户即放行）；多客户端的细粒度同意页延后。
+- **MFA / refresh token / social login / 密钥轮换 / HSM**：仍延后。
+- **TLS**：Keystone 绑定明文 HTTP；TLS 由 Sluice/ACME 在 `https://id.w33d.xyz` 前面终结。
 
-> 安全提示：v0 的自动批准在无任何认证 / 同意的情况下为 `u_admin` 签发 token，**仅可用于 dev**。
+## 浏览器 passkey 手动验证（manual test recipe）
+
+无浏览器的 passkey 证明已由 `tests/webauthn_flow.rs`（`SoftPasskey` 软件认证器）端到端覆盖；下面是**真人浏览器**流程：
+
+1. 部署后访问 `https://id.w33d.xyz/login`（需有效 TLS——`__Host-` cookie 与 WebAuthn 都要求 HTTPS）。
+2. 用 `BOOTSTRAP_ADMIN_PASSWORD` 设定的密码，以用户名 `admin@holdfast.local`（或 `u_admin`）走**密码兜底**登录 → 跳转 `/account`。
+3. 在 `/account` 点击 **“Register a passkey”**，按浏览器/系统提示用平台认证器（Touch ID / Windows Hello / 手机）完成注册；页面显示注册成功后 passkey 计数变为 1。
+4. 登出（`/logout`），回到 `/login`，在下半部输入用户名后点 **“Sign in with a passkey”** → 完成 WebAuthn 断言即**无密码登录**，跳回 `/account`。
+5. 端到端 OIDC：让 Sluice 发起 `GET https://id.w33d.xyz/authorize?...`（PKCE S256）。未登录会先 302 到 `/login`；完成上面的登录后回到 `/authorize` 即 302 携 `code` 回跳 `https://id.w33d.xyz/callback`，再由 `/token`、`/userinfo` 完成。
+
+> 说明：因引入 `webauthn-rs`（其 `webauthn-rs-core` 依赖 OpenSSL），构建镜像的 builder 阶段新增 `libssl-dev`/`pkg-config`，runtime 阶段新增 `libssl3`/`ca-certificates`（见 `Dockerfile`）。
