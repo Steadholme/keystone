@@ -154,10 +154,17 @@ fn render_login(csrf: &str, return_to: &str, username: &str, error: Option<&str>
 }
 
 fn render_account(csrf: &str, sub: &str, email: &str, passkeys: usize) -> String {
+    // Display name: the email local-part (the closest thing to a human name we hold).
+    let name = email
+        .split('@')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(email);
     ACCOUNT_HTML
         .replace("{{CSRF}}", &esc(csrf))
         .replace("{{SUB}}", &esc(sub))
         .replace("{{EMAIL}}", &esc(email))
+        .replace("{{NAME}}", &esc(name))
         .replace("{{PASSKEYS}}", &passkeys.to_string())
 }
 

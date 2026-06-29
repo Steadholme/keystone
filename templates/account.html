@@ -3,22 +3,94 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Account · HOLDFAST Keystone</title>
+  <meta name="color-scheme" content="light">
+  <title>Account · HOLDFAST</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
-  <main class="card">
-    <h1>Your account</h1>
-    <p class="sub">You are signed in.</p>
-    <p class="kv"><b>Subject</b> &nbsp;<code>{{SUB}}</code></p>
-    <p class="kv"><b>Email</b> &nbsp;{{EMAIL}}</p>
-    <p class="kv"><b>Passkeys</b> &nbsp;{{PASSKEYS}}</p>
-    <button id="register-passkey" type="button">Register a passkey</button>
-    <div id="reg-status" class="status"></div>
-    <form method="post" action="/logout">
-      <input type="hidden" name="csrf_token" value="{{CSRF}}">
-      <button class="danger" type="submit">Log out</button>
-    </form>
+<body class="page-console">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand brand--sm" href="/account" aria-label="HOLDFAST home">
+        <span class="brand__glyph" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="hf-shield-sm" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#818CF8"/>
+                <stop offset="1" stop-color="#4F46E5"/>
+              </linearGradient>
+            </defs>
+            <path d="M24 4 8 9.5V22c0 11 7 17.4 16 21.5C33 39.4 40 33 40 22V9.5L24 4Z" fill="url(#hf-shield-sm)"/>
+            <rect x="20" y="19" width="8" height="13" rx="1" fill="#fff" fill-opacity="0.92"/>
+            <path d="M20 19v-2.5a4 4 0 0 1 8 0V19" stroke="#fff" stroke-width="2" stroke-opacity="0.92" fill="none"/>
+          </svg>
+        </span>
+        <span class="brand__word">HOLDFAST</span>
+      </a>
+      <div class="topbar__right">
+        <span class="user-email">{{EMAIL}}</span>
+        <form method="post" action="/logout" class="logout-form">
+          <input type="hidden" name="csrf_token" value="{{CSRF}}">
+          <button class="btn btn-ghost btn-sm" type="submit">Log out</button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <main class="console">
+    <div class="console__head">
+      <h1>Account</h1>
+      <p class="muted">Manage your identity and security for this keep.</p>
+    </div>
+
+    <div class="card-stack">
+      <!-- Identity -->
+      <section class="card">
+        <div class="card__head"><h2>Identity</h2></div>
+        <div class="card__body">
+          <div class="identity">
+            <span class="avatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            </span>
+            <div>
+              <div class="identity__name">{{NAME}}</div>
+              <div class="identity__email">{{EMAIL}}</div>
+            </div>
+          </div>
+          <dl class="kv-list">
+            <div class="kv-row"><dt>Subject</dt><dd><code>{{SUB}}</code></dd></div>
+            <div class="kv-row"><dt>Email</dt><dd>{{EMAIL}}</dd></div>
+            <div class="kv-row"><dt>Display name</dt><dd>{{NAME}}</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <!-- Security -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Security</h2>
+          <span class="badge">Session active</span>
+        </div>
+        <div class="card__body">
+          <div class="passkey-summary">
+            <span class="pk-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11a4 4 0 0 0-4 4v1"/><path d="M16 15.5c0-2.2-1.8-4-4-4"/><path d="M12 7a4 4 0 0 1 4 4v3.5"/><path d="M7.5 8.5a6 6 0 0 1 9 .5"/><path d="M12 11v8"/></svg>
+            </span>
+            <span><b>{{PASSKEYS}}</b> passkey(s) registered to this account.</span>
+          </div>
+          <button id="register-passkey" class="btn btn-primary" type="button">
+            <span class="btn-content">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+              <span>Register a passkey</span>
+            </span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+          <div id="reg-status" class="status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="card__note">You are signed in to <code>{{SUB}}</code>. Sessions end automatically after inactivity or when you log out.</div>
+      </section>
+    </div>
   </main>
   <script src="/static/login.js"></script>
 </body>

@@ -50,8 +50,17 @@ function setStatus(id, msg, kind) {
   el.className = "status" + (kind ? " " + kind : "");
 }
 
+// Toggle a button's loading state (spinner + disabled) during a WebAuthn ceremony.
+function setBusy(el, busy) {
+  if (!el) return;
+  el.classList.toggle("is-loading", busy);
+  el.disabled = busy;
+}
+
 // --- Registration (session-protected; user already logged in) ---------------
 async function registerPasskey() {
+  const btn = document.getElementById("register-passkey");
+  setBusy(btn, true);
   setStatus("reg-status", "Touch your authenticator…", "");
   try {
     const cc = await postJson("/webauthn/register/begin", {});
@@ -77,6 +86,7 @@ async function registerPasskey() {
     setTimeout(() => window.location.reload(), 900);
   } catch (e) {
     setStatus("reg-status", "Registration failed: " + e.message, "err");
+    setBusy(btn, false);
   }
 }
 
@@ -84,6 +94,8 @@ async function registerPasskey() {
 async function authenticatePasskey(returnTo) {
   const username = (document.getElementById("wa-username") || {}).value || "";
   if (!username) { setStatus("wa-status", "Enter your username first.", "err"); return; }
+  const btn = document.getElementById("passkey-login");
+  setBusy(btn, true);
   setStatus("wa-status", "Touch your authenticator…", "");
   try {
     const rc = await postJson("/webauthn/authenticate/begin", { username });
@@ -110,6 +122,7 @@ async function authenticatePasskey(returnTo) {
     window.location = returnTo || "/account";
   } catch (e) {
     setStatus("wa-status", "Passkey login failed: " + e.message, "err");
+    setBusy(btn, false);
   }
 }
 
