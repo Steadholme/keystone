@@ -18,7 +18,7 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use keystone::config::{seed_client, seed_user};
-use keystone::store::{new_opaque_code, AuthCode, PgStore};
+use keystone::store::{new_opaque_code, AuthCode, Credential, PgStore, Session, WebauthnState};
 use keystone::{now_secs, AppState};
 use serde_json::Value;
 use tower::ServiceExt;
@@ -67,7 +67,10 @@ async fn pg_store_full_integration() {
     );
     assert!(state.store.get_client("ghost").is_none(), "unknown client");
 
-    let user = state.store.get_user("u_admin").expect("seeded user present");
+    let user = state
+        .store
+        .get_user("u_admin")
+        .expect("seeded user present");
     assert_eq!(user.email, "admin@holdfast.local");
     assert!(state.store.get_user("nobody").is_none(), "unknown user");
 
@@ -95,15 +98,98 @@ async fn pg_store_full_integration() {
         "single-use: a consumed code is gone"
     );
 
+    // --- login-layer tables round-trip on real Postgres --------------------
+    // password hash: set + read back via username lookup (sub OR email).
+    let hash = keystone::auth::hash_password("pg-bootstrap-pass").unwrap();
+    state.store.set_password_hash("u_admin", &hash);
+    let by_email = state
+        .store
+        .get_user_by_username("admin@holdfast.local")
+        .expect("lookup by email");
+    assert_eq!(by_email.sub, "u_admin");
+    assert_eq!(by_email.password_hash.as_deref(), Some(hash.as_str()));
+    assert!(
+        keystone::auth::verify_password(
+            "pg-bootstrap-pass",
+            by_email.password_hash.as_deref().unwrap()
+        ),
+        "stored Argon2 hash verifies"
+    );
+
+    // sessions: put -> get -> delete.
+    let sess = Session {
+        id: new_opaque_code(),
+        user_sub: "u_admin".to_string(),
+        created_at: now_secs(),
+        expires_at: now_secs() + 3600,
+    };
+    state.store.put_session(sess.clone());
+    assert_eq!(
+        state.store.get_session(&sess.id).map(|s| s.user_sub),
+        Some("u_admin".to_string())
+    );
+    state.store.delete_session(&sess.id);
+    assert!(
+        state.store.get_session(&sess.id).is_none(),
+        "session deleted"
+    );
+
+    // webauthn credentials: put -> list -> get -> update passkey.
+    let cred = Credential {
+        cred_id: "cred-pg-1".to_string(),
+        user_sub: "u_admin".to_string(),
+        passkey: r#"{"v":1}"#.to_string(),
+        created_at: now_secs(),
+    };
+    state.store.put_credential(cred.clone());
+    assert_eq!(state.store.list_credentials("u_admin").len(), 1);
+    assert_eq!(
+        state.store.get_credential("cred-pg-1").map(|c| c.passkey),
+        Some(r#"{"v":1}"#.to_string())
+    );
+    state
+        .store
+        .update_credential_passkey("cred-pg-1", r#"{"v":2}"#);
+    assert_eq!(
+        state.store.get_credential("cred-pg-1").map(|c| c.passkey),
+        Some(r#"{"v":2}"#.to_string()),
+        "counter/passkey update persisted"
+    );
+
+    // webauthn ceremony state: put -> single-use take.
+    let wstate = WebauthnState {
+        id: new_opaque_code(),
+        kind: "reg".to_string(),
+        state: r#"{"reg":true}"#.to_string(),
+        expires_at: now_secs() + 300,
+    };
+    state.store.put_state(wstate.clone());
+    let taken = state
+        .store
+        .take_state(&wstate.id)
+        .expect("state present once");
+    assert_eq!(taken.kind, "reg");
+    assert!(
+        state.store.take_state(&wstate.id).is_none(),
+        "single-use: ceremony state is consumed"
+    );
+
     // --- full HTTP flow through the PG-backed app (authorize -> token -> userinfo) ---
     let (issued_code, returned_state) = authorize_ok(&state).await;
     assert!(!issued_code.is_empty(), "authorize minted a code");
     assert_eq!(returned_state, "xyz123", "state preserved");
 
     let (status, _, body) = call(&state, token_request(&issued_code, REDIRECT_URI, VERIFIER)).await;
-    assert_eq!(status, StatusCode::OK, "token exchange via PG store succeeds");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "token exchange via PG store succeeds"
+    );
     let tok: Value = serde_json::from_slice(&body).unwrap();
-    let access_token = tok["access_token"].as_str().expect("access_token").to_string();
+    let access_token = tok["access_token"]
+        .as_str()
+        .expect("access_token")
+        .to_string();
     let id_token = tok["id_token"].as_str().expect("id_token").to_string();
 
     // Verify tokens against the live JWKS (same path Sluice uses).
@@ -164,7 +250,14 @@ async fn authorize_ok(state: &AppState) -> (String, String) {
          &scope=openid+email+profile&state=xyz123&code_challenge={CHALLENGE}\
          &code_challenge_method=S256&nonce=n-abc"
     );
-    let (status, headers, _) = call(state, get(&uri)).await;
+    // `/authorize` now gates on a session; establish one for the seeded admin.
+    let session_cookie = keystone::auth::create_session(state, "u_admin");
+    let req = Request::builder()
+        .uri(uri)
+        .header(header::COOKIE, format!("__Host-session={session_cookie}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, _) = call(state, req).await;
     assert_eq!(status, StatusCode::FOUND, "authorize should 302");
     let location = headers
         .get(header::LOCATION)

@@ -42,9 +42,17 @@ fn authorize_uri(challenge: &str, method: &str) -> String {
     )
 }
 
-/// Run a valid `/authorize` and return the issued (code, state).
+/// Run a valid `/authorize` (with an established login session, since `/authorize` now
+/// gates on one) and return the issued (code, state).
 async fn authorize_ok(state: &AppState) -> (String, String) {
-    let (status, headers, _) = call(state, get(&authorize_uri(CHALLENGE, "S256"))).await;
+    // Establish a session for the seeded admin and carry its signed cookie.
+    let session_cookie = keystone::auth::create_session(state, "u_admin");
+    let req = Request::builder()
+        .uri(authorize_uri(CHALLENGE, "S256"))
+        .header(header::COOKIE, format!("__Host-session={session_cookie}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, _) = call(state, req).await;
     assert_eq!(status, StatusCode::FOUND, "authorize should 302");
     let location = headers
         .get(header::LOCATION)
@@ -52,7 +60,10 @@ async fn authorize_ok(state: &AppState) -> (String, String) {
         .to_str()
         .unwrap()
         .to_string();
-    assert!(location.starts_with(REDIRECT_URI), "redirect to registered URI");
+    assert!(
+        location.starts_with(REDIRECT_URI),
+        "redirect to registered URI"
+    );
     parse_redirect(&location)
 }
 
@@ -103,7 +114,10 @@ async fn full_authorization_code_pkce_flow() {
     assert_eq!(tok["token_type"], "Bearer");
     assert_eq!(tok["expires_in"], 3600);
     assert_eq!(tok["scope"], "openid email profile");
-    let access_token = tok["access_token"].as_str().expect("access_token").to_string();
+    let access_token = tok["access_token"]
+        .as_str()
+        .expect("access_token")
+        .to_string();
     let id_token = tok["id_token"].as_str().expect("id_token").to_string();
 
     // Fetch JWKS and build the SAME verifier Sluice uses.
@@ -211,7 +225,8 @@ async fn jwks_shape_and_kid_matches_token_header() {
 async fn token_wrong_verifier_is_invalid_grant() {
     let state = keystone::build_dev_state();
     let (code, _) = authorize_ok(&state).await;
-    let (status, _, body) = call(&state, token_request(&code, REDIRECT_URI, "wrong-verifier")).await;
+    let (status, _, body) =
+        call(&state, token_request(&code, REDIRECT_URI, "wrong-verifier")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let e: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(e["error"], "invalid_grant");
