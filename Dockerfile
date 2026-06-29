@@ -29,6 +29,12 @@ FROM debian:trixie-slim AS runtime
 RUN useradd --system --uid 10001 --user-group --no-create-home keystone
 COPY --from=builder /build/target/release/keystone /usr/local/bin/keystone
 
+# Persistent data dir for the RSA signing key (SIGNING_KEY_PATH). Created owned by the
+# non-root uid so a mounted named volume inherits writable ownership — the key file is
+# NOT baked into the image, only generated/persisted at runtime under /data.
+RUN mkdir -p /data && chown 10001:10001 /data
+VOLUME ["/data"]
+
 USER keystone
 # Default in-container bind; overridable at runtime. Discovery `iss` comes from ISSUER.
 ENV BIND_ADDR=0.0.0.0:8080

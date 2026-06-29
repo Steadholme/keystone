@@ -8,8 +8,11 @@ v0 只实现一条完整的纵向切片：`authorization_code` + **PKCE（S256�
 
 - 默认开发监听：`127.0.0.1:8080`，issuer = `http://127.0.0.1:8080`（均可由环境变量覆盖，见下）
 - 公开客户端（public client，无 client secret），安全性依赖 **redirect_uri 精确匹配** + **单次使用、PKCE 绑定的授权码**
-- 启动时生成一对 RSA-2048 密钥，常驻 `Arc<SigningKey>`；`kid` 采用 RFC 7638 JWK thumbprint，
+- 一对 RSA-2048 密钥常驻 `Arc<SigningKey>`；`kid` 采用 RFC 7638 JWK thumbprint，
   保证 JWKS 中的 `kid` 与 JWT header 中的 `kid` 永不漂移
+- **签名密钥可持久化**：设置 `SIGNING_KEY_PATH` 后，密钥从该 PEM 文件加载（不存在则生成并写入），
+  因此 `kid` 在**重启后保持稳定**——避免重启 Keystone 轮换 `kid`、导致 Sluice 在刷新窗口内拒签（401）的问题；
+  未设置时每次启动生成临时密钥（dev/test 默认，行为不变）
 
 ## 如何运行
 
@@ -42,6 +45,7 @@ curl -s http://127.0.0.1:8080/jwks.json | jq .
 | `ISSUER` | JWT `iss` 与发现文档中的 issuer；所有端点 URL 由它派生 | `http://127.0.0.1:8080` |
 | `KEYSTONE_STORE` | 存储后端：`memory` \| `postgres` | `memory` |
 | `DATABASE_URL` | Postgres DSN（仅 `postgres` 模式需要） | 无 |
+| `SIGNING_KEY_PATH` | RSA 签名密钥的 PEM 文件路径（PKCS#1）。设置后从该文件**加载或生成并持久化**密钥，使 `kid` 跨重启稳定；不存在则首启生成、文件权限 `0600`、自动创建父目录。**未设置**则每次启动生成临时密钥（dev/test 默认） | 无（临时密钥） |
 
 > 在 docker-compose 中，规范 issuer 为网络内服务名 `http://keystone:8080`：将 `ISSUER=http://keystone:8080`、`BIND_ADDR=0.0.0.0:8080` 即可让 Keystone 把该值嵌入 JWT 并在发现文档中对外广播，Sluice 据此拉取 discovery / JWKS 并校验 `iss`。
 
@@ -89,7 +93,19 @@ docker run --rm -p 8080:8080 \
   -e DATABASE_URL=postgres://postgres:pw@db:5432/keystone \
   -e ISSUER=http://keystone:8080 \
   holdfast/keystone:dev
+
+# 运行（持久化签名密钥 —— kid 跨重启稳定）
+# 镜像内置 /data 目录并 chown 给非 root uid 10001；挂一个具名卷到 /data 即可读写。
+docker run --rm -p 8080:8080 \
+  -e KEYSTONE_STORE=memory \
+  -e SIGNING_KEY_PATH=/data/signing_key.pem \
+  -v keystone_keys:/data \
+  holdfast/keystone:dev
 ```
+
+> 镜像以非 root（uid `10001`）运行，且内置 `mkdir -p /data && chown 10001:10001 /data`，
+> 因此挂载的具名卷会继承可写属主。密钥**不**烘焙进镜像，仅在运行时于 `SIGNING_KEY_PATH` 生成 / 持久化（权限 `0600`）。
+> 在 docker-compose 中：给 keystone 服务设 `SIGNING_KEY_PATH: /data/signing_key.pem` 并挂一个具名卷 `keystone_keys:/data`。
 
 镜像为多阶段构建（`rust:1.96-slim` 构建 → `debian:trixie-slim` 运行），**非 root** 用户、仅 rustls（无 openssl）、`EXPOSE 8080`。容器 `HEALTHCHECK` 使用内置子命令 `keystone healthcheck`（裸 TCP 请求 `/healthz`，无需 curl）。
 
@@ -124,7 +140,8 @@ docker run --rm -p 8080:8080 \
 ## 已延后（deferred / TODO seam）
 
 - **FusionDB 后端存储**：现已提供**可移植的 PostgreSQL 数据层**（`PgStore`，仅标准 SQL），日后可无改动迁移到 FusionDB over pgwire；但 FusionDB 本身**尚未接入**，默认仍为 `InMemoryStore`。
-- **密钥持久化 / 轮换**：当前每次启动生成一对密钥并常驻内存；`keys.rs` 标注了从 FusionDB/HSM 加载/轮换的 TODO 接缝。
+- **密钥持久化**：已实现——设置 `SIGNING_KEY_PATH` 即把签名密钥持久化到 PEM 文件，`kid` 跨重启稳定（见上）。未设置时仍为临时密钥。
+- **密钥轮换 / HSM**：仍延后；`keys.rs` 标注了从 FusionDB/HSM 加载并轮换的 TODO 接缝。
 - **登录 / 同意 / Passkey / MFA / refresh token / social login**：v0 在 `/authorize` 直接自动批准种子用户
   `u_admin`（仅限 dev），位于清晰命名的 dev 路径后，后续可在不改变 wire 契约的前提下接入。
 - **TLS**：v0 绑定明文 HTTP；TLS 由 Sluice/ACME 在前面终结（属未来接缝）。

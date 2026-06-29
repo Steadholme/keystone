@@ -27,6 +27,10 @@ pub struct Config {
     pub code_ttl: u64,
     /// v0 dev-only: subject auto-approved at `/authorize` (no login UI yet — seam).
     pub dev_user_sub: String,
+    /// Optional PEM path for the persisted RSA signing key. When `Some`, the key is
+    /// loaded from (or generated into) this file so the `kid` is STABLE across restarts.
+    /// When `None`, an ephemeral key is generated each startup (dev/test default).
+    pub signing_key_path: Option<String>,
 }
 
 impl Config {
@@ -39,6 +43,7 @@ impl Config {
             id_ttl: 3600,
             code_ttl: 60,
             dev_user_sub: SEED_USER_SUB.to_string(),
+            signing_key_path: None,
         }
     }
 
@@ -58,6 +63,12 @@ impl Config {
         if let Ok(bind_addr) = std::env::var("BIND_ADDR") {
             if !bind_addr.is_empty() {
                 config.bind_addr = bind_addr;
+            }
+        }
+        // SIGNING_KEY_PATH (unset/empty -> ephemeral key, unchanged dev/test behavior).
+        if let Ok(path) = std::env::var("SIGNING_KEY_PATH") {
+            if !path.is_empty() {
+                config.signing_key_path = Some(path);
             }
         }
         config

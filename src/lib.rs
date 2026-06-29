@@ -100,10 +100,26 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
         other => return Err(format!("unknown KEYSTONE_STORE={other} (use memory|postgres)")),
     };
 
+    // SIGNING_KEY_PATH set -> persist/reload the key so the `kid` is stable across
+    // restarts (prevents the Sluice 401 gap on a Keystone restart). Unset -> ephemeral
+    // key, unchanged dev/test behavior.
+    let keys = match config.signing_key_path.as_deref() {
+        Some(path) => {
+            let key = SigningKey::load_or_generate(std::path::Path::new(path))
+                .map_err(|e| format!("load/persist signing key at {path}: {e}"))?;
+            tracing::info!(%path, kid = %key.kid, "persisted signing key ready");
+            key
+        }
+        None => {
+            tracing::warn!("SIGNING_KEY_PATH unset — using EPHEMERAL signing key (kid rotates on restart)");
+            SigningKey::generate()
+        }
+    };
+
     Ok(AppState {
         config: Arc::new(config),
         store,
-        keys: Arc::new(SigningKey::generate()),
+        keys: Arc::new(keys),
     })
 }
 
