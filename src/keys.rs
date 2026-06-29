@@ -177,8 +177,14 @@ mod tests {
         let second = SigningKey::load_or_generate(&path).expect("second load_or_generate");
 
         assert_eq!(first.kid, second.kid, "kid must be stable across reloads");
-        assert_eq!(first.jwk_n, second.jwk_n, "modulus must match across reloads");
-        assert_eq!(first.jwk_e, second.jwk_e, "exponent must match across reloads");
+        assert_eq!(
+            first.jwk_n, second.jwk_n,
+            "modulus must match across reloads"
+        );
+        assert_eq!(
+            first.jwk_e, second.jwk_e,
+            "exponent must match across reloads"
+        );
 
         // Persisted file must be owner-only (0600) on unix.
         #[cfg(unix)]

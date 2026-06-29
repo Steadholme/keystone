@@ -46,7 +46,9 @@ pub async fn token(
 
     // Expiry.
     if now_secs() > auth_code.expires_at {
-        return Err(AppError::InvalidGrant("authorization code expired".to_string()));
+        return Err(AppError::InvalidGrant(
+            "authorization code expired".to_string(),
+        ));
     }
 
     // Binding: client_id + exact redirect_uri must match those bound at /authorize.
@@ -59,7 +61,9 @@ pub async fn token(
 
     // PKCE S256: base64url(sha256(code_verifier)) == stored challenge.
     if !pkce::verify_s256(&params.code_verifier, &auth_code.code_challenge) {
-        return Err(AppError::InvalidGrant("PKCE verification failed".to_string()));
+        return Err(AppError::InvalidGrant(
+            "PKCE verification failed".to_string(),
+        ));
     }
 
     // Resolve the approved user for the id_token email claim.

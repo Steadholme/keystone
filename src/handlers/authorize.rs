@@ -2,13 +2,15 @@
 //!
 //! Validates client_id and EXACT redirect_uri (400 JSON if bad — never redirect
 //! to an untrusted URI), requires `code_challenge` + `code_challenge_method=S256`,
-//! auto-approves the seeded dev user, mints+stores an [`AuthCode`], then 302s back.
+//! then GATES ON A SESSION: no valid session 302s to `/login?return_to=<this URL>`;
+//! a valid session mints+stores an [`AuthCode`] for the authenticated user and 302s back.
 
-use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
+use axum::extract::{OriginalUri, Query, State};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
+use crate::auth;
 use crate::error::AppError;
 use crate::store::{new_opaque_code, AuthCode};
 use crate::{now_secs, AppState};
@@ -32,6 +34,8 @@ pub struct AuthorizeParams {
 
 pub async fn authorize(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    OriginalUri(original_uri): OriginalUri,
     Query(params): Query<AuthorizeParams>,
 ) -> Result<Response, AppError> {
     // 1. Client must exist. Do NOT redirect on an unknown client.
@@ -69,8 +73,21 @@ pub async fn authorize(
         ));
     }
 
-    // 5. v0 dev path: auto-approve the seeded user (no login UI / consent yet — seam).
-    let sub = state.config.dev_user_sub.clone();
+    // 5. GATE: require a valid login session. No session -> bounce to /login, carrying
+    //    the full /authorize request (path + query) as a same-origin return_to so the
+    //    user lands back here after authenticating. Auto-consent for the first-party
+    //    seeded client is fine for v0.
+    let sub = match auth::current_session(&state, &headers) {
+        Some(session) => session.user_sub,
+        None => {
+            let return_to = original_uri
+                .path_and_query()
+                .map(|pq| pq.as_str())
+                .unwrap_or("/authorize");
+            let location = format!("/login?return_to={}", urlencode_component(return_to));
+            return Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response());
+        }
+    };
 
     // 6. Mint + store a single-use, bound authorization code.
     let code = new_opaque_code();
@@ -94,4 +111,19 @@ pub async fn authorize(
     }
 
     Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
+}
+
+/// Percent-encode a string for safe use as a single query-string component value
+/// (encodes everything outside the RFC 3986 unreserved set).
+fn urlencode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }

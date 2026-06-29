@@ -4,6 +4,7 @@
 //! provides [`build_dev_state`] (seeded store + generated signing key). The
 //! integration test consumes [`app`] directly via `tower::oneshot`.
 
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod handlers;
@@ -11,12 +12,14 @@ pub mod jwt;
 pub mod keys;
 pub mod pkce;
 pub mod store;
+pub mod webauthn;
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::routing::{get, post};
 use axum::Router;
+use webauthn_rs::Webauthn;
 
 use crate::config::Config;
 use crate::keys::SigningKey;
@@ -28,11 +31,14 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<dyn Store>,
     pub keys: Arc<SigningKey>,
+    /// WebAuthn relying party (rp_id / rp_origin), shared read-only.
+    pub webauthn: Arc<Webauthn>,
 }
 
-/// Build the router wiring all six contract endpoints onto `state`.
+/// Build the router wiring the OIDC contract endpoints + the login surface onto `state`.
 pub fn app(state: AppState) -> Router {
     Router::new()
+        // --- OIDC / OAuth2 contract (unchanged wire behavior) ---
         .route("/healthz", get(handlers::discovery::healthz))
         .route(
             "/.well-known/openid-configuration",
@@ -42,6 +48,31 @@ pub fn app(state: AppState) -> Router {
         .route("/authorize", get(handlers::authorize::authorize))
         .route("/token", post(handlers::token::token))
         .route("/userinfo", get(handlers::userinfo::userinfo))
+        // --- Login surface ---
+        .route(
+            "/login",
+            get(handlers::login::login_page).post(handlers::login::login_submit),
+        )
+        .route("/account", get(handlers::login::account_page))
+        .route("/logout", post(handlers::login::logout))
+        .route("/static/{file}", get(handlers::static_assets::serve))
+        // --- WebAuthn ceremonies ---
+        .route(
+            "/webauthn/register/begin",
+            post(handlers::webauthn::register_begin),
+        )
+        .route(
+            "/webauthn/register/finish",
+            post(handlers::webauthn::register_finish),
+        )
+        .route(
+            "/webauthn/authenticate/begin",
+            post(handlers::webauthn::authenticate_begin),
+        )
+        .route(
+            "/webauthn/authenticate/finish",
+            post(handlers::webauthn::authenticate_finish),
+        )
         .with_state(state)
 }
 
@@ -53,10 +84,14 @@ pub fn build_dev_state() -> AppState {
     store.put_client(config::seed_client());
     store.put_user(config::seed_user());
 
+    let webauthn = webauthn::build(&config.webauthn_rp_id, &config.webauthn_rp_origin)
+        .expect("dev WebAuthn config is valid");
+
     AppState {
         config: Arc::new(config),
         store: Arc::new(store),
         keys: Arc::new(SigningKey::generate()),
+        webauthn: Arc::new(webauthn),
     }
 }
 
@@ -97,8 +132,30 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
             mem.put_user(config::seed_user());
             Arc::new(mem)
         }
-        other => return Err(format!("unknown KEYSTONE_STORE={other} (use memory|postgres)")),
+        other => {
+            return Err(format!(
+                "unknown KEYSTONE_STORE={other} (use memory|postgres)"
+            ))
+        }
     };
+
+    // Bootstrap admin password: if BOOTSTRAP_ADMIN_PASSWORD is set and the seeded admin
+    // has no password hash yet, hash it (Argon2id) and UPSERT it. Idempotent across
+    // restarts — once a hash exists we never overwrite it from the env.
+    if let Some(password) = config.bootstrap_admin_password.as_deref() {
+        match store.get_user(config::SEED_USER_SUB) {
+            Some(user) if user.password_hash.is_none() => {
+                let hash = auth::hash_password(password)
+                    .map_err(|e| format!("hash bootstrap admin password: {e}"))?;
+                store.set_password_hash(config::SEED_USER_SUB, &hash);
+                tracing::info!(sub = %config::SEED_USER_SUB, "bootstrap admin password applied");
+            }
+            Some(_) => {
+                tracing::info!("admin already has a password hash — bootstrap password ignored")
+            }
+            None => tracing::warn!("seeded admin missing — cannot apply bootstrap password"),
+        }
+    }
 
     // SIGNING_KEY_PATH set -> persist/reload the key so the `kid` is stable across
     // restarts (prevents the Sluice 401 gap on a Keystone restart). Unset -> ephemeral
@@ -111,15 +168,27 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
             key
         }
         None => {
-            tracing::warn!("SIGNING_KEY_PATH unset — using EPHEMERAL signing key (kid rotates on restart)");
+            tracing::warn!(
+                "SIGNING_KEY_PATH unset — using EPHEMERAL signing key (kid rotates on restart)"
+            );
             SigningKey::generate()
         }
     };
+
+    // WebAuthn relying party — fail loudly on a bad rp_id/origin pairing.
+    let webauthn = webauthn::build(&config.webauthn_rp_id, &config.webauthn_rp_origin)
+        .map_err(|e| format!("build WebAuthn: {e}"))?;
+    tracing::info!(
+        rp_id = %config.webauthn_rp_id,
+        rp_origin = %config.webauthn_rp_origin,
+        "WebAuthn relying party ready"
+    );
 
     Ok(AppState {
         config: Arc::new(config),
         store,
         keys: Arc::new(keys),
+        webauthn: Arc::new(webauthn),
     })
 }
 

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · HOLDFAST Keystone</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="card">
+    <h1>HOLDFAST Keystone</h1>
+    <p class="sub">Sign in to continue</p>
+    {{ERROR}}
+    <form method="post" action="/login">
+      <input type="hidden" name="csrf_token" value="{{CSRF}}">
+      <input type="hidden" name="return_to" value="{{RETURN_TO}}">
+      <label for="username">Username or email</label>
+      <input id="username" name="username" type="text" autocomplete="username" value="{{USERNAME}}" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+    </form>
+    <div class="divider"><span>or</span></div>
+    <label for="wa-username">Username or email</label>
+    <input id="wa-username" type="text" autocomplete="username" value="{{USERNAME}}">
+    <button id="passkey-login" class="secondary" type="button" data-return-to="{{RETURN_TO}}">Sign in with a passkey</button>
+    <div id="wa-status" class="status"></div>
+  </main>
+  <script src="/static/login.js"></script>
+</body>
+</html>
