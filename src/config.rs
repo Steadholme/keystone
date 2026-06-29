@@ -42,6 +42,27 @@ impl Config {
         }
     }
 
+    /// Configuration with the dev defaults overridden by environment variables.
+    ///
+    /// `ISSUER` and `BIND_ADDR` are overridable; every other value keeps its dev
+    /// default when the env var is unset, so the dev contract is unchanged out of
+    /// the box. In docker-compose the canonical issuer is the in-network service
+    /// name, e.g. `ISSUER=http://keystone:8080` with `BIND_ADDR=0.0.0.0:8080`.
+    pub fn from_env() -> Self {
+        let mut config = Config::dev();
+        if let Ok(issuer) = std::env::var("ISSUER") {
+            if !issuer.is_empty() {
+                config.issuer = issuer;
+            }
+        }
+        if let Ok(bind_addr) = std::env::var("BIND_ADDR") {
+            if !bind_addr.is_empty() {
+                config.bind_addr = bind_addr;
+            }
+        }
+        config
+    }
+
     pub fn authorization_endpoint(&self) -> String {
         format!("{}/authorize", self.issuer)
     }
