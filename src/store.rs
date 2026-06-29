@@ -1,8 +1,13 @@
 //! Storage abstraction + models.
 //!
-//! `Store` is a small trait with a single in-memory implementation for v0.
+//! `Store` is a small trait with an in-memory and a PostgreSQL implementation.
 //! Handlers depend only on the trait, never on a concrete store type, so a
 //! FusionDB-backed implementation can drop in later without touching handlers.
+//!
+//! The login layer adds four persisted concerns behind the same seam: a nullable
+//! `password_hash` on the user, server-side `sessions`, WebAuthn `credentials`
+//! (serialised Passkeys), and short-lived WebAuthn ceremony `states`. All use the
+//! same portable-SQL discipline as the v0 OAuth tables.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,11 +32,43 @@ impl Client {
     }
 }
 
-/// End user. Stable subject id + email. Future: passkey credentials/profile attach here (seam).
+/// End user. Stable subject id + email, plus an optional Argon2 password hash
+/// (PHC string; `None` until a password is set).
 #[derive(Clone, Debug)]
 pub struct User {
     pub sub: String,
     pub email: String,
+    pub password_hash: Option<String>,
+}
+
+/// A server-side login session. The opaque `id` is what the signed `__Host-session`
+/// cookie carries; everything else is authoritative state held here.
+#[derive(Clone, Debug)]
+pub struct Session {
+    pub id: String,
+    pub user_sub: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+}
+
+/// A registered WebAuthn passkey. `passkey` is the serde-JSON of webauthn-rs' `Passkey`
+/// (the authoritative credential, including the signature counter we bump on each auth).
+#[derive(Clone, Debug)]
+pub struct Credential {
+    pub cred_id: String,
+    pub user_sub: String,
+    pub passkey: String,
+    pub created_at: u64,
+}
+
+/// Short-lived server-side state for an in-flight WebAuthn ceremony. `state` is the
+/// serde-JSON of `PasskeyRegistration` or `PasskeyAuthentication`; `kind` is `"reg"`/`"auth"`.
+#[derive(Clone, Debug)]
+pub struct WebauthnState {
+    pub id: String,
+    pub kind: String,
+    pub state: String,
+    pub expires_at: u64,
 }
 
 /// A bound, single-use authorization code. Minted at `/authorize`, consumed at `/token`.
@@ -55,17 +92,41 @@ pub struct AuthCode {
 pub trait Store: Send + Sync {
     fn get_client(&self, client_id: &str) -> Option<Client>;
     fn get_user(&self, sub: &str) -> Option<User>;
+    /// Resolve a user by login name: matches the subject id OR the email (exact).
+    fn get_user_by_username(&self, username: &str) -> Option<User>;
+    /// Set (or replace) a user's Argon2 password hash.
+    fn set_password_hash(&self, sub: &str, hash: &str);
+
     fn put_code(&self, code: AuthCode);
     /// Atomically remove and return the code (single-use consume); `None` if absent.
     fn take_code(&self, code: &str) -> Option<AuthCode>;
+
+    fn put_session(&self, session: Session);
+    fn get_session(&self, id: &str) -> Option<Session>;
+    fn delete_session(&self, id: &str);
+
+    fn put_credential(&self, cred: Credential);
+    /// All passkeys registered to a user (for authentication + exclude lists).
+    fn list_credentials(&self, user_sub: &str) -> Vec<Credential>;
+    /// One credential by its id (resolves the owning user during passwordless auth).
+    fn get_credential(&self, cred_id: &str) -> Option<Credential>;
+    /// Replace a credential's serialised passkey (counter update after each auth).
+    fn update_credential_passkey(&self, cred_id: &str, passkey: &str);
+
+    fn put_state(&self, state: WebauthnState);
+    /// Atomically remove and return ceremony state (single-use); `None` if absent.
+    fn take_state(&self, id: &str) -> Option<WebauthnState>;
 }
 
-/// In-memory `Store` for v0. `std::sync::Mutex<HashMap>` — no async lock needed.
+/// In-memory `Store`. `std::sync::Mutex<HashMap>` — no async lock needed.
 #[derive(Default)]
 pub struct InMemoryStore {
     clients: Mutex<HashMap<String, Client>>,
     users: Mutex<HashMap<String, User>>,
     codes: Mutex<HashMap<String, AuthCode>>,
+    sessions: Mutex<HashMap<String, Session>>,
+    credentials: Mutex<HashMap<String, Credential>>,
+    states: Mutex<HashMap<String, WebauthnState>>,
 }
 
 impl InMemoryStore {
@@ -107,6 +168,21 @@ impl Store for InMemoryStore {
             .cloned()
     }
 
+    fn get_user_by_username(&self, username: &str) -> Option<User> {
+        self.users
+            .lock()
+            .expect("users lock poisoned")
+            .values()
+            .find(|u| u.sub == username || u.email == username)
+            .cloned()
+    }
+
+    fn set_password_hash(&self, sub: &str, hash: &str) {
+        if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
+            user.password_hash = Some(hash.to_string());
+        }
+    }
+
     fn put_code(&self, code: AuthCode) {
         self.codes
             .lock()
@@ -115,10 +191,76 @@ impl Store for InMemoryStore {
     }
 
     fn take_code(&self, code: &str) -> Option<AuthCode> {
-        self.codes
+        self.codes.lock().expect("codes lock poisoned").remove(code)
+    }
+
+    fn put_session(&self, session: Session) {
+        self.sessions
             .lock()
-            .expect("codes lock poisoned")
-            .remove(code)
+            .expect("sessions lock poisoned")
+            .insert(session.id.clone(), session);
+    }
+
+    fn get_session(&self, id: &str) -> Option<Session> {
+        self.sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .get(id)
+            .cloned()
+    }
+
+    fn delete_session(&self, id: &str) {
+        self.sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .remove(id);
+    }
+
+    fn put_credential(&self, cred: Credential) {
+        self.credentials
+            .lock()
+            .expect("credentials lock poisoned")
+            .insert(cred.cred_id.clone(), cred);
+    }
+
+    fn list_credentials(&self, user_sub: &str) -> Vec<Credential> {
+        self.credentials
+            .lock()
+            .expect("credentials lock poisoned")
+            .values()
+            .filter(|c| c.user_sub == user_sub)
+            .cloned()
+            .collect()
+    }
+
+    fn get_credential(&self, cred_id: &str) -> Option<Credential> {
+        self.credentials
+            .lock()
+            .expect("credentials lock poisoned")
+            .get(cred_id)
+            .cloned()
+    }
+
+    fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
+        if let Some(cred) = self
+            .credentials
+            .lock()
+            .expect("credentials lock poisoned")
+            .get_mut(cred_id)
+        {
+            cred.passkey = passkey.to_string();
+        }
+    }
+
+    fn put_state(&self, state: WebauthnState) {
+        self.states
+            .lock()
+            .expect("states lock poisoned")
+            .insert(state.id.clone(), state);
+    }
+
+    fn take_state(&self, id: &str) -> Option<WebauthnState> {
+        self.states.lock().expect("states lock poisoned").remove(id)
     }
 }
 
@@ -130,12 +272,12 @@ impl Store for InMemoryStore {
 // same layer later runs unchanged on FusionDB over pgwire: TEXT/BIGINT columns,
 // plain PRIMARY KEY/UNIQUE/NOT NULL constraints, parameterized queries, UPSERT via
 // `INSERT ... ON CONFLICT`, and a child table (`client_redirect_uris`) instead of an
-// array/JSON column. Single-use codes are enforced by delete-on-consume.
+// array/JSON column. Single-use codes/states are enforced by delete-on-consume.
 //
 // The `Store` trait is intentionally synchronous (handlers never `.await` the store),
 // so each method bridges to async sqlx via `block_in_place` + the runtime `Handle`.
 // This requires a multi-threaded Tokio runtime, which production (`#[tokio::main]`)
-// and the `multi_thread` integration test both provide.
+// and the `multi_thread` integration tests both provide.
 
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
@@ -198,6 +340,10 @@ impl PgStore {
         )
         .execute(&self.pool)
         .await?;
+        // Additive, idempotent column for the password fallback (older DBs predate it).
+        sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS auth_codes (\
                  code TEXT PRIMARY KEY, \
@@ -212,10 +358,41 @@ impl PgStore {
         )
         .execute(&self.pool)
         .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS sessions (\
+                 id TEXT PRIMARY KEY, \
+                 user_sub TEXT NOT NULL, \
+                 created_at BIGINT NOT NULL, \
+                 expires_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS webauthn_credentials (\
+                 cred_id TEXT PRIMARY KEY, \
+                 user_sub TEXT NOT NULL, \
+                 passkey TEXT NOT NULL, \
+                 created_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS webauthn_states (\
+                 id TEXT PRIMARY KEY, \
+                 kind TEXT NOT NULL, \
+                 state TEXT NOT NULL, \
+                 expires_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     /// Idempotent UPSERT seed of the dev client (+ its redirect URIs) and user.
+    /// Password hash is intentionally NOT touched here (seeded separately, once).
     pub async fn seed(&self, client: &Client, user: &User) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO oauth_clients (client_id, name) VALUES ($1, $2) \
@@ -277,18 +454,41 @@ impl PgStore {
         }))
     }
 
+    fn user_from_row(row: &sqlx::postgres::PgRow) -> Result<User, sqlx::Error> {
+        Ok(User {
+            sub: row.try_get("sub")?,
+            email: row.try_get("email")?,
+            password_hash: row.try_get("password_hash")?,
+        })
+    }
+
     async fn get_user_async(&self, sub: &str) -> Result<Option<User>, sqlx::Error> {
-        let row = sqlx::query("SELECT sub, email FROM users WHERE sub = $1")
+        let row = sqlx::query("SELECT sub, email, password_hash FROM users WHERE sub = $1")
             .bind(sub)
             .fetch_optional(&self.pool)
             .await?;
-        match row {
-            Some(r) => Ok(Some(User {
-                sub: r.try_get("sub")?,
-                email: r.try_get("email")?,
-            })),
-            None => Ok(None),
-        }
+        row.as_ref().map(Self::user_from_row).transpose()
+    }
+
+    async fn get_user_by_username_async(
+        &self,
+        username: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        let row =
+            sqlx::query("SELECT sub, email, password_hash FROM users WHERE sub = $1 OR email = $1")
+                .bind(username)
+                .fetch_optional(&self.pool)
+                .await?;
+        row.as_ref().map(Self::user_from_row).transpose()
+    }
+
+    async fn set_password_hash_async(&self, sub: &str, hash: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET password_hash = $2 WHERE sub = $1")
+            .bind(sub)
+            .bind(hash)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     async fn put_code_async(&self, code: &AuthCode) -> Result<(), sqlx::Error> {
@@ -349,26 +549,179 @@ impl PgStore {
             used: false,
         }))
     }
+
+    async fn put_session_async(&self, s: &Session) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO sessions (id, user_sub, created_at, expires_at) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (id) DO UPDATE SET user_sub = EXCLUDED.user_sub, \
+             created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at",
+        )
+        .bind(&s.id)
+        .bind(&s.user_sub)
+        .bind(s.created_at as i64)
+        .bind(s.expires_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_session_async(&self, id: &str) -> Result<Option<Session>, sqlx::Error> {
+        let row =
+            sqlx::query("SELECT id, user_sub, created_at, expires_at FROM sessions WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some(row) = row else { return Ok(None) };
+        let created_at: i64 = row.try_get("created_at")?;
+        let expires_at: i64 = row.try_get("expires_at")?;
+        Ok(Some(Session {
+            id: row.try_get("id")?,
+            user_sub: row.try_get("user_sub")?,
+            created_at: created_at as u64,
+            expires_at: expires_at as u64,
+        }))
+    }
+
+    async fn delete_session_async(&self, id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM sessions WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn put_credential_async(&self, c: &Credential) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO webauthn_credentials (cred_id, user_sub, passkey, created_at) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (cred_id) DO UPDATE SET passkey = EXCLUDED.passkey",
+        )
+        .bind(&c.cred_id)
+        .bind(&c.user_sub)
+        .bind(&c.passkey)
+        .bind(c.created_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    fn credential_from_row(row: &sqlx::postgres::PgRow) -> Result<Credential, sqlx::Error> {
+        let created_at: i64 = row.try_get("created_at")?;
+        Ok(Credential {
+            cred_id: row.try_get("cred_id")?,
+            user_sub: row.try_get("user_sub")?,
+            passkey: row.try_get("passkey")?,
+            created_at: created_at as u64,
+        })
+    }
+
+    async fn list_credentials_async(&self, user_sub: &str) -> Result<Vec<Credential>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT cred_id, user_sub, passkey, created_at FROM webauthn_credentials \
+             WHERE user_sub = $1 ORDER BY created_at",
+        )
+        .bind(user_sub)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(Self::credential_from_row).collect()
+    }
+
+    async fn get_credential_async(&self, cred_id: &str) -> Result<Option<Credential>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT cred_id, user_sub, passkey, created_at FROM webauthn_credentials \
+             WHERE cred_id = $1",
+        )
+        .bind(cred_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(Self::credential_from_row).transpose()
+    }
+
+    async fn update_credential_passkey_async(
+        &self,
+        cred_id: &str,
+        passkey: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE webauthn_credentials SET passkey = $2 WHERE cred_id = $1")
+            .bind(cred_id)
+            .bind(passkey)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn put_state_async(&self, s: &WebauthnState) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO webauthn_states (id, kind, state, expires_at) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (id) DO UPDATE SET kind = EXCLUDED.kind, state = EXCLUDED.state, \
+             expires_at = EXCLUDED.expires_at",
+        )
+        .bind(&s.id)
+        .bind(&s.kind)
+        .bind(&s.state)
+        .bind(s.expires_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Atomic single-use consume of ceremony state (read + DELETE in one transaction).
+    async fn take_state_async(&self, id: &str) -> Result<Option<WebauthnState>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let row =
+            sqlx::query("SELECT id, kind, state, expires_at FROM webauthn_states WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        let deleted = sqlx::query("DELETE FROM webauthn_states WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        if deleted.rows_affected() != 1 {
+            return Ok(None);
+        }
+        let expires_at: i64 = row.try_get("expires_at")?;
+        Ok(Some(WebauthnState {
+            id: row.try_get("id")?,
+            kind: row.try_get("kind")?,
+            state: row.try_get("state")?,
+            expires_at: expires_at as u64,
+        }))
+    }
 }
 
 impl Store for PgStore {
     fn get_client(&self, client_id: &str) -> Option<Client> {
-        match self.block_on(self.get_client_async(client_id)) {
-            Ok(client) => client,
-            Err(e) => {
+        self.block_on(self.get_client_async(client_id))
+            .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "pg get_client failed");
                 None
-            }
-        }
+            })
     }
 
     fn get_user(&self, sub: &str) -> Option<User> {
-        match self.block_on(self.get_user_async(sub)) {
-            Ok(user) => user,
-            Err(e) => {
-                tracing::error!(error = %e, "pg get_user failed");
+        self.block_on(self.get_user_async(sub)).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg get_user failed");
+            None
+        })
+    }
+
+    fn get_user_by_username(&self, username: &str) -> Option<User> {
+        self.block_on(self.get_user_by_username_async(username))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg get_user_by_username failed");
                 None
-            }
+            })
+    }
+
+    fn set_password_hash(&self, sub: &str, hash: &str) {
+        if let Err(e) = self.block_on(self.set_password_hash_async(sub, hash)) {
+            tracing::error!(error = %e, "pg set_password_hash failed");
         }
     }
 
@@ -379,17 +732,78 @@ impl Store for PgStore {
     }
 
     fn take_code(&self, code: &str) -> Option<AuthCode> {
-        match self.block_on(self.take_code_async(code)) {
-            Ok(code) => code,
-            Err(e) => {
+        self.block_on(self.take_code_async(code))
+            .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "pg take_code failed");
                 None
-            }
+            })
+    }
+
+    fn put_session(&self, session: Session) {
+        if let Err(e) = self.block_on(self.put_session_async(&session)) {
+            tracing::error!(error = %e, "pg put_session failed");
         }
+    }
+
+    fn get_session(&self, id: &str) -> Option<Session> {
+        self.block_on(self.get_session_async(id))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg get_session failed");
+                None
+            })
+    }
+
+    fn delete_session(&self, id: &str) {
+        if let Err(e) = self.block_on(self.delete_session_async(id)) {
+            tracing::error!(error = %e, "pg delete_session failed");
+        }
+    }
+
+    fn put_credential(&self, cred: Credential) {
+        if let Err(e) = self.block_on(self.put_credential_async(&cred)) {
+            tracing::error!(error = %e, "pg put_credential failed");
+        }
+    }
+
+    fn list_credentials(&self, user_sub: &str) -> Vec<Credential> {
+        self.block_on(self.list_credentials_async(user_sub))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg list_credentials failed");
+                Vec::new()
+            })
+    }
+
+    fn get_credential(&self, cred_id: &str) -> Option<Credential> {
+        self.block_on(self.get_credential_async(cred_id))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg get_credential failed");
+                None
+            })
+    }
+
+    fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
+        if let Err(e) = self.block_on(self.update_credential_passkey_async(cred_id, passkey)) {
+            tracing::error!(error = %e, "pg update_credential_passkey failed");
+        }
+    }
+
+    fn put_state(&self, state: WebauthnState) {
+        if let Err(e) = self.block_on(self.put_state_async(&state)) {
+            tracing::error!(error = %e, "pg put_state failed");
+        }
+    }
+
+    fn take_state(&self, id: &str) -> Option<WebauthnState> {
+        self.block_on(self.take_state_async(id))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg take_state failed");
+                None
+            })
     }
 }
 
-/// Generate an opaque 32-byte CSPRNG authorization code, base64url-no-pad encoded.
+/// Generate an opaque 32-byte CSPRNG token, base64url-no-pad encoded. Used for
+/// authorization codes, session ids, CSRF tokens, and ceremony-state ids.
 pub fn new_opaque_code() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);

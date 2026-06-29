@@ -42,7 +42,22 @@ tracing-subscriber = "0.3"
 # query!/query_as! macros, so the build needs NO database. rustls TLS (no native-tls/openssl).
 # PgPool + parameterized standard SQL. Later runs unchanged on FusionDB over pgwire.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+# Argon2id password hashing for the password-fallback login. PHC-string hashes embed the
+# salt + params, so users.password_hash is a single self-describing TEXT column (portable SQL).
+argon2 = "0.5"
+# WebAuthn / passkey ceremonies. `danger-allow-state-serialisation` makes the in-flight
+# PasskeyRegistration / PasskeyAuthentication states (De)serializable so they can be parked
+# server-side in the webauthn_states table between begin/finish, then dropped.
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
+# Stable per-user WebAuthn user-handle (Uuid v5 of the subject) so register/authenticate agree.
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+# HMAC-SHA256 over the opaque session id, keyed by SESSION_SECRET, so a tampered
+# `__Host-session` cookie is rejected before any store lookup (defense in depth).
+hmac = "0.12"
 
 [dev-dependencies]
 # ServiceExt::oneshot drives the Router in-process for the end-to-end contract test (no port binding).
 tower = { version = "0.5", features = ["util"] }
+# SoftPasskey: a pure-software WebAuthn authenticator that drives the real register/authenticate
+# ceremonies against the live Webauthn config in tests — proves the passkey path with no browser.
+webauthn-authenticator-rs = { version = "0.5", features = ["softpasskey"] }
