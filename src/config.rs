@@ -271,6 +271,8 @@ pub fn seed_client() -> Client {
         name: "Sluice (dev)".to_string(),
         // Public client (PKCE-only) — no secret.
         client_secret_hash: None,
+        // First-party: the gateway itself — never prompt for consent.
+        first_party: true,
     }
 }
 
@@ -284,6 +286,8 @@ pub fn gw_client(config: &Config, client_secret_hash: String) -> Client {
         redirect_uris: vec![config.gw_redirect_uri.clone()],
         name: GW_CLIENT_NAME.to_string(),
         client_secret_hash: Some(client_secret_hash),
+        // First-party: the platform gateway RP — skips the consent screen.
+        first_party: true,
     }
 }
 

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Authorize · HOLDFAST</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-auth">
+  <div class="auth-split">
+    <aside class="brand-panel">
+      <div class="brand-panel__inner">
+        <a class="brand" href="/account" aria-label="HOLDFAST home">
+          <span class="brand__glyph" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="hf-shield" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#818CF8"/>
+                  <stop offset="1" stop-color="#4F46E5"/>
+                </linearGradient>
+              </defs>
+              <path d="M24 4 8 9.5V22c0 11 7 17.4 16 21.5C33 39.4 40 33 40 22V9.5L24 4Z" fill="url(#hf-shield)"/>
+              <rect x="20" y="19" width="8" height="13" rx="1" fill="#fff" fill-opacity="0.92"/>
+              <path d="M20 19v-2.5a4 4 0 0 1 8 0V19" stroke="#fff" stroke-width="2" stroke-opacity="0.92" fill="none"/>
+            </svg>
+          </span>
+          <span class="brand__word">HOLDFAST</span>
+        </a>
+        <p class="brand__tagline">Sovereign Identity</p>
+        <p class="brand__lede">You control which apps may use your account.</p>
+      </div>
+    </aside>
+
+    <main class="auth-main">
+      <div class="auth-card">
+        <header class="auth-card__head">
+          <h1 class="auth-card__title">Authorize access</h1>
+          <p class="auth-card__sub"><b>{{CLIENT_NAME}}</b> wants to sign you in with your HOLDFAST account and access:</p>
+        </header>
+
+        <ul class="scope-list">
+          {{SCOPES}}
+        </ul>
+
+        <form class="consent-form" method="post" action="/authorize/consent">
+          <input type="hidden" name="csrf_token" value="{{CSRF}}">
+          {{HIDDEN}}
+          <div class="consent-actions">
+            <button class="btn btn-ghost" type="submit" name="decision" value="deny">Deny</button>
+            <button class="btn btn-primary" type="submit" name="decision" value="approve">Allow</button>
+          </div>
+        </form>
+
+        <p class="auth-card__foot muted">Only allow apps you trust. You can review access from your account.</p>
+      </div>
+
+      <footer class="site-foot">
+        <span>© HOLDFAST</span>
+        <span class="dot" aria-hidden="true">·</span>
+        <a href="/account">Account</a>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

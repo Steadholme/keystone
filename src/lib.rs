@@ -61,6 +61,10 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/jwks.json", get(handlers::discovery::jwks))
         .route("/authorize", get(handlers::authorize::authorize))
+        .route(
+            "/authorize/consent",
+            post(handlers::authorize::consent_submit),
+        )
         .route("/token", post(handlers::token::token))
         .route("/userinfo", get(handlers::userinfo::userinfo))
         // --- Login surface ---

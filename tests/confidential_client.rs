@@ -45,6 +45,7 @@ async fn state_with_confidential_client() -> AppState {
             redirect_uris: vec![GW_REDIRECT.to_string()],
             name: "gw".to_string(),
             client_secret_hash: Some(hash),
+            first_party: true,
         })
         .await;
     state

@@ -32,6 +32,10 @@ pub struct Client {
     pub name: String,
     /// Argon2id PHC hash of the client secret. `None` = public client (no secret).
     pub client_secret_hash: Option<String>,
+    /// First-party (platform-owned) clients skip the consent screen — they *are* the
+    /// platform (Sluice gateway). Third-party clients (default `false`) must obtain the
+    /// user's consent for the requested scopes before a code is issued.
+    pub first_party: bool,
 }
 
 impl Client {
@@ -148,6 +152,10 @@ pub trait Store: Send + Sync {
     /// Insert or replace a client (incl. its redirect URIs + optional secret hash).
     /// Idempotent UPSERT — used to seed the confidential gateway client at startup.
     async fn put_client(&self, client: Client);
+    /// The scope string a user previously consented to for `client_id`, or `None`.
+    async fn get_consent(&self, user_sub: &str, client_id: &str) -> Option<String>;
+    /// Record (replace) the granted scope set for (user, client).
+    async fn put_consent(&self, user_sub: &str, client_id: &str, scope: &str, granted_at: u64);
     async fn get_user(&self, sub: &str) -> Option<User>;
     /// Resolve a user by login name: matches the subject id OR the email (exact).
     async fn get_user_by_username(&self, username: &str) -> Option<User>;
@@ -210,6 +218,8 @@ pub struct InMemoryStore {
     credentials: Mutex<HashMap<String, Credential>>,
     states: Mutex<HashMap<String, WebauthnState>>,
     verification_tokens: Mutex<HashMap<String, VerificationToken>>,
+    /// Consent record keyed by `(user_sub, client_id)` -> (granted scope, granted_at).
+    consents: Mutex<HashMap<(String, String), (String, u64)>>,
 }
 
 impl InMemoryStore {
@@ -254,6 +264,24 @@ impl Store for InMemoryStore {
             .lock()
             .expect("clients lock poisoned")
             .insert(client.client_id.clone(), client);
+    }
+
+    async fn get_consent(&self, user_sub: &str, client_id: &str) -> Option<String> {
+        self.consents
+            .lock()
+            .expect("consents lock poisoned")
+            .get(&(user_sub.to_string(), client_id.to_string()))
+            .map(|(scope, _)| scope.clone())
+    }
+
+    async fn put_consent(&self, user_sub: &str, client_id: &str, scope: &str, granted_at: u64) {
+        self.consents
+            .lock()
+            .expect("consents lock poisoned")
+            .insert(
+                (user_sub.to_string(), client_id.to_string()),
+                (scope.to_string(), granted_at),
+            );
     }
 
     async fn get_user(&self, sub: &str) -> Option<User> {
@@ -502,11 +530,30 @@ impl PgStore {
         sqlx::query("ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS client_secret_hash TEXT")
             .execute(&self.pool)
             .await?;
+        // First-party flag: platform-owned clients skip the consent screen. Default false so
+        // any newly-registered third-party client requires consent; the seeded first-party
+        // clients (Sluice) re-upsert with true on every startup.
+        sqlx::query("ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS first_party BOOLEAN NOT NULL DEFAULT false")
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS client_redirect_uris (\
                  client_id TEXT NOT NULL, \
                  redirect_uri TEXT NOT NULL, \
                  PRIMARY KEY (client_id, redirect_uri)\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        // Recorded user consent per (user, client): the granted scope set + when. Presence of a
+        // covering row lets a third-party client skip the consent screen on subsequent authorizes.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS consents (\
+                 user_sub TEXT NOT NULL, \
+                 client_id TEXT NOT NULL, \
+                 scope TEXT NOT NULL, \
+                 granted_at BIGINT NOT NULL, \
+                 PRIMARY KEY (user_sub, client_id)\
              )",
         )
         .execute(&self.pool)
@@ -615,11 +662,13 @@ impl PgStore {
     /// Password hash is intentionally NOT touched here (seeded separately, once).
     pub async fn seed(&self, client: &Client, user: &User) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO oauth_clients (client_id, name) VALUES ($1, $2) \
-             ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name",
+            "INSERT INTO oauth_clients (client_id, name, first_party) VALUES ($1, $2, $3) \
+             ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name, \
+             first_party = EXCLUDED.first_party",
         )
         .bind(&client.client_id)
         .bind(&client.name)
+        .bind(client.first_party)
         .execute(&self.pool)
         .await?;
         for uri in &client.redirect_uris {
@@ -646,13 +695,15 @@ impl PgStore {
     }
 
     async fn get_client_async(&self, client_id: &str) -> Result<Option<Client>, sqlx::Error> {
-        let row = sqlx::query("SELECT name, client_secret_hash FROM oauth_clients WHERE client_id = $1")
-            .bind(client_id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row =
+            sqlx::query("SELECT name, client_secret_hash, first_party FROM oauth_clients WHERE client_id = $1")
+                .bind(client_id)
+                .fetch_optional(&self.pool)
+                .await?;
         let Some(row) = row else { return Ok(None) };
         let name: String = row.try_get("name")?;
         let client_secret_hash: Option<String> = row.try_get("client_secret_hash")?;
+        let first_party: bool = row.try_get("first_party")?;
         let uri_rows = sqlx::query(
             "SELECT redirect_uri FROM client_redirect_uris WHERE client_id = $1 \
              ORDER BY redirect_uri",
@@ -669,19 +720,22 @@ impl PgStore {
             redirect_uris,
             name,
             client_secret_hash,
+            first_party,
         }))
     }
 
     /// Idempotent UPSERT of a client (name + secret hash) and its redirect URIs.
     async fn put_client_async(&self, c: &Client) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO oauth_clients (client_id, name, client_secret_hash) VALUES ($1, $2, $3) \
+            "INSERT INTO oauth_clients (client_id, name, client_secret_hash, first_party) \
+             VALUES ($1, $2, $3, $4) \
              ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name, \
-             client_secret_hash = EXCLUDED.client_secret_hash",
+             client_secret_hash = EXCLUDED.client_secret_hash, first_party = EXCLUDED.first_party",
         )
         .bind(&c.client_id)
         .bind(&c.name)
         .bind(c.client_secret_hash.as_deref())
+        .bind(c.first_party)
         .execute(&self.pool)
         .await?;
         for uri in &c.redirect_uris {
@@ -694,6 +748,44 @@ impl PgStore {
             .execute(&self.pool)
             .await?;
         }
+        Ok(())
+    }
+
+    async fn get_consent_async(
+        &self,
+        user_sub: &str,
+        client_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row =
+            sqlx::query("SELECT scope FROM consents WHERE user_sub = $1 AND client_id = $2")
+                .bind(user_sub)
+                .bind(client_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        match row {
+            Some(r) => Ok(Some(r.try_get("scope")?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn put_consent_async(
+        &self,
+        user_sub: &str,
+        client_id: &str,
+        scope: &str,
+        granted_at: u64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO consents (user_sub, client_id, scope, granted_at) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (user_sub, client_id) DO UPDATE SET scope = EXCLUDED.scope, \
+             granted_at = EXCLUDED.granted_at",
+        )
+        .bind(user_sub)
+        .bind(client_id)
+        .bind(scope)
+        .bind(granted_at as i64)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -1112,6 +1204,24 @@ impl Store for PgStore {
     async fn put_client(&self, client: Client) {
         if let Err(e) = self.put_client_async(&client).await {
             tracing::error!(error = %e, "pg put_client failed");
+        }
+    }
+
+    async fn get_consent(&self, user_sub: &str, client_id: &str) -> Option<String> {
+        self.get_consent_async(user_sub, client_id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg get_consent failed");
+                None
+            })
+    }
+
+    async fn put_consent(&self, user_sub: &str, client_id: &str, scope: &str, granted_at: u64) {
+        if let Err(e) = self
+            .put_consent_async(user_sub, client_id, scope, granted_at)
+            .await
+        {
+            tracing::error!(error = %e, "pg put_consent failed");
         }
     }
 
