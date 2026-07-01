@@ -302,5 +302,8 @@ pub fn seed_user() -> User {
         // backfill runs. `created_at=0` marks it as predating the self-service lifecycle.
         email_verified: true,
         created_at: 0,
+        // Operator account: admin out of the box so `/admin` is reachable from day one.
+        is_admin: true,
+        disabled: false,
     }
 }

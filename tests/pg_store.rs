@@ -82,6 +82,39 @@ async fn pg_store_full_integration() {
         "unknown user"
     );
 
+    // Admin-console columns: the seeded operator is admin + enabled out of the box
+    // (seed INSERT on a fresh DB; created_at=0 backfill on a pre-existing one).
+    assert!(user.is_admin, "seeded operator is admin");
+    assert!(!user.disabled, "seeded operator starts enabled");
+    // disable/enable + admin-bit round-trips on real Postgres (restored afterwards so
+    // the test database stays reusable).
+    state.store.set_disabled("u_admin", true).await;
+    assert!(state.store.get_user("u_admin").await.unwrap().disabled);
+    state.store.set_disabled("u_admin", false).await;
+    assert!(!state.store.get_user("u_admin").await.unwrap().disabled);
+    state.store.set_is_admin("u_admin", false).await;
+    assert!(!state.store.get_user("u_admin").await.unwrap().is_admin);
+    state.store.set_is_admin("u_admin", true).await;
+    assert!(
+        state
+            .store
+            .list_users()
+            .await
+            .iter()
+            .any(|u| u.sub == "u_admin"),
+        "list_users surfaces the operator"
+    );
+    let clients = state.store.list_clients().await;
+    let listed = clients
+        .iter()
+        .find(|c| c.client_id == CLIENT_ID)
+        .expect("list_clients surfaces the seeded client");
+    assert!(listed.first_party, "first_party round-trips");
+    assert!(
+        listed.redirect_uris.iter().any(|u| u == REDIRECT_URI),
+        "redirect URIs merged from the child table"
+    );
+
     // put_code -> take_code, and single-use (delete-on-consume) enforcement.
     let code = new_opaque_code();
     state

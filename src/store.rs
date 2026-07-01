@@ -58,6 +58,11 @@ impl Client {
 /// until they click the emailed verification link. `created_at` is the epoch-seconds
 /// registration time (`0` for rows that predate the column — those are backfilled to
 /// verified on migration so seeded/manual accounts are never locked out).
+///
+/// `is_admin` gates the `/admin` operator console; rows with `created_at=0` (seeded /
+/// pre-provisioned accounts) are backfilled to admin on migration so the operator is never
+/// locked out. `disabled` blocks new password logins with an explicit 403 — an admin
+/// switch, self-service users always start enabled.
 #[derive(Clone, Debug)]
 pub struct User {
     pub sub: String,
@@ -65,6 +70,8 @@ pub struct User {
     pub password_hash: Option<String>,
     pub email_verified: bool,
     pub created_at: u64,
+    pub is_admin: bool,
+    pub disabled: bool,
 }
 
 /// A single-use email verification / password-reset token. `kind` is `"verify"` (email
@@ -172,6 +179,14 @@ pub trait Store: Send + Sync {
     ) -> Result<(), CreateUserError>;
     /// Mark a user's email as verified (idempotent).
     async fn set_email_verified(&self, sub: &str);
+    /// All users, oldest first (drives the `/admin` console user table).
+    async fn list_users(&self) -> Vec<User>;
+    /// Set (or clear) a user's disabled flag (admin action; disabled users cannot log in).
+    async fn set_disabled(&self, sub: &str, disabled: bool);
+    /// Set (or clear) a user's admin flag (admin action; gates the `/admin` console).
+    async fn set_is_admin(&self, sub: &str, is_admin: bool);
+    /// All registered clients, ordered by client_id (read-only `/admin` clients table).
+    async fn list_clients(&self) -> Vec<Client>;
 
     /// Store a single-use verification/reset token.
     async fn put_verification_token(&self, token: VerificationToken);
@@ -326,6 +341,8 @@ impl Store for InMemoryStore {
                 password_hash: Some(password_hash.to_string()),
                 email_verified: false,
                 created_at,
+                is_admin: false,
+                disabled: false,
             },
         );
         Ok(())
@@ -335,6 +352,42 @@ impl Store for InMemoryStore {
         if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
             user.email_verified = true;
         }
+    }
+
+    async fn list_users(&self) -> Vec<User> {
+        let mut v: Vec<User> = self
+            .users
+            .lock()
+            .expect("users lock poisoned")
+            .values()
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.sub.cmp(&b.sub)));
+        v
+    }
+
+    async fn set_disabled(&self, sub: &str, disabled: bool) {
+        if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
+            user.disabled = disabled;
+        }
+    }
+
+    async fn set_is_admin(&self, sub: &str, is_admin: bool) {
+        if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
+            user.is_admin = is_admin;
+        }
+    }
+
+    async fn list_clients(&self) -> Vec<Client> {
+        let mut v: Vec<Client> = self
+            .clients
+            .lock()
+            .expect("clients lock poisoned")
+            .values()
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| a.client_id.cmp(&b.client_id));
+        v
     }
 
     async fn put_verification_token(&self, token: VerificationToken) {
@@ -579,11 +632,27 @@ impl PgStore {
         sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await?;
+        // Additive, idempotent columns for the `/admin` operator console.
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false",
+        )
+        .execute(&self.pool)
+        .await?;
         // CRITICAL backfill: rows that predate `email_verified` (created_at still 0 — seeded or
         // manually provisioned accounts like u_admin/w33d) are trusted and MUST stay able to log
         // in. Flip them to verified once, right after the ALTERs. Idempotent: re-running only
         // re-touches those same legacy rows (self-service users carry a real created_at > 0).
         sqlx::query("UPDATE users SET email_verified = true WHERE created_at = 0")
+            .execute(&self.pool)
+            .await?;
+        // Same trick for the admin bit: pre-existing seeded/provisioned accounts (created_at=0,
+        // i.e. the operator) are admins out of the box, so `/admin` can never lock everyone out.
+        sqlx::query("UPDATE users SET is_admin = true WHERE created_at = 0")
             .execute(&self.pool)
             .await?;
         // Single-use verification/reset tokens (delete-on-consume, mirrors auth_codes).
@@ -681,10 +750,12 @@ impl PgStore {
             .execute(&self.pool)
             .await?;
         }
-        // Seed the admin as verified (created_at=0) — a trusted, pre-provisioned account that
-        // must be able to log in on a brand-new database, before any backfill has rows to touch.
+        // Seed the admin as verified + admin (created_at=0) — a trusted, pre-provisioned account
+        // that must be able to log in AND reach /admin on a brand-new database, before any
+        // backfill has rows to touch.
         sqlx::query(
-            "INSERT INTO users (sub, email, email_verified, created_at) VALUES ($1, $2, true, 0) \
+            "INSERT INTO users (sub, email, email_verified, created_at, is_admin) \
+             VALUES ($1, $2, true, 0, true) \
              ON CONFLICT (sub) DO UPDATE SET email = EXCLUDED.email",
         )
         .bind(&user.sub)
@@ -797,6 +868,8 @@ impl PgStore {
             password_hash: row.try_get("password_hash")?,
             email_verified: row.try_get("email_verified")?,
             created_at: created_at as u64,
+            is_admin: row.try_get("is_admin")?,
+            disabled: row.try_get("disabled")?,
         })
     }
 
@@ -817,7 +890,8 @@ impl PgStore {
 
     async fn get_user_async(&self, sub: &str) -> Result<Option<User>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT sub, email, password_hash, email_verified, created_at FROM users WHERE sub = $1",
+            "SELECT sub, email, password_hash, email_verified, created_at, is_admin, disabled \
+             FROM users WHERE sub = $1",
         )
         .bind(sub)
         .fetch_optional(&self.pool)
@@ -830,13 +904,75 @@ impl PgStore {
         username: &str,
     ) -> Result<Option<User>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT sub, email, password_hash, email_verified, created_at FROM users \
-             WHERE sub = $1 OR email = $1",
+            "SELECT sub, email, password_hash, email_verified, created_at, is_admin, disabled \
+             FROM users WHERE sub = $1 OR email = $1",
         )
         .bind(username)
         .fetch_optional(&self.pool)
         .await?;
         row.as_ref().map(Self::user_from_row).transpose()
+    }
+
+    async fn list_users_async(&self) -> Result<Vec<User>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT sub, email, password_hash, email_verified, created_at, is_admin, disabled \
+             FROM users ORDER BY created_at, sub",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(Self::user_from_row).collect()
+    }
+
+    async fn set_disabled_async(&self, sub: &str, disabled: bool) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET disabled = $2 WHERE sub = $1")
+            .bind(sub)
+            .bind(disabled)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn set_is_admin_async(&self, sub: &str, is_admin: bool) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET is_admin = $2 WHERE sub = $1")
+            .bind(sub)
+            .bind(is_admin)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// All clients + their redirect URIs in two fixed queries (no N+1), merged in memory.
+    async fn list_clients_async(&self) -> Result<Vec<Client>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT client_id, name, client_secret_hash, first_party FROM oauth_clients \
+             ORDER BY client_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut clients = Vec::with_capacity(rows.len());
+        for row in &rows {
+            clients.push(Client {
+                client_id: row.try_get("client_id")?,
+                redirect_uris: Vec::new(),
+                name: row.try_get("name")?,
+                client_secret_hash: row.try_get("client_secret_hash")?,
+                first_party: row.try_get("first_party")?,
+            });
+        }
+        let uri_rows = sqlx::query(
+            "SELECT client_id, redirect_uri FROM client_redirect_uris \
+             ORDER BY client_id, redirect_uri",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for row in &uri_rows {
+            let client_id: String = row.try_get("client_id")?;
+            let uri: String = row.try_get("redirect_uri")?;
+            if let Some(c) = clients.iter_mut().find(|c| c.client_id == client_id) {
+                c.redirect_uris.push(uri);
+            }
+        }
+        Ok(clients)
     }
 
     async fn set_password_hash_async(&self, sub: &str, hash: &str) -> Result<(), sqlx::Error> {
@@ -1262,6 +1398,32 @@ impl Store for PgStore {
         if let Err(e) = self.set_email_verified_async(sub).await {
             tracing::error!(error = %e, "pg set_email_verified failed");
         }
+    }
+
+    async fn list_users(&self) -> Vec<User> {
+        self.list_users_async().await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg list_users failed");
+            Vec::new()
+        })
+    }
+
+    async fn set_disabled(&self, sub: &str, disabled: bool) {
+        if let Err(e) = self.set_disabled_async(sub, disabled).await {
+            tracing::error!(error = %e, "pg set_disabled failed");
+        }
+    }
+
+    async fn set_is_admin(&self, sub: &str, is_admin: bool) {
+        if let Err(e) = self.set_is_admin_async(sub, is_admin).await {
+            tracing::error!(error = %e, "pg set_is_admin failed");
+        }
+    }
+
+    async fn list_clients(&self) -> Vec<Client> {
+        self.list_clients_async().await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg list_clients failed");
+            Vec::new()
+        })
     }
 
     async fn put_verification_token(&self, token: VerificationToken) {

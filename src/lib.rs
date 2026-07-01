@@ -87,6 +87,19 @@ pub fn app(state: AppState) -> Router {
             "/account/sessions/revoke-all",
             post(handlers::login::revoke_other_sessions),
         )
+        // --- Operator admin console (session + is_admin gated) ---
+        .route("/admin", get(handlers::admin::admin_page))
+        .route("/admin/users/disable", post(handlers::admin::disable_user))
+        .route("/admin/users/enable", post(handlers::admin::enable_user))
+        .route("/admin/users/reset", post(handlers::admin::force_reset))
+        .route(
+            "/admin/users/revoke-sessions",
+            post(handlers::admin::revoke_user_sessions),
+        )
+        .route(
+            "/admin/users/toggle-admin",
+            post(handlers::admin::toggle_admin),
+        )
         // --- Public self-service identity lifecycle ---
         .route(
             "/register",

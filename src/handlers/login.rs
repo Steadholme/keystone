@@ -89,6 +89,26 @@ pub async fn login_submit(
     }
 
     let user = state.store.get_user_by_username(&form.username).await;
+
+    // GATE: a disabled account is rejected up front — BEFORE any password verification —
+    // with an explicit 403, so neither the outcome nor its timing depends on the password.
+    if user.as_ref().is_some_and(|u| u.disabled) {
+        state.audit.emit(AuditEvent::warning(
+            "login.disabled",
+            &form.username,
+            "password",
+            "account disabled",
+        ));
+        let csrf = auth::new_csrf_token();
+        let body = render_login(
+            &csrf,
+            &return_to,
+            &form.username,
+            Some("This account is disabled. Contact your administrator."),
+        );
+        return html_with_cookies(StatusCode::FORBIDDEN, body, &[auth::csrf_cookie(&csrf)]);
+    }
+
     let verified = user
         .as_ref()
         .and_then(|u| u.password_hash.as_deref())
@@ -398,7 +418,7 @@ fn device_label(ua: &str) -> String {
 }
 
 /// Compact "time ago" rendering (seconds/minutes/hours/days) from `now` to `then`.
-fn ago(now: u64, then: u64) -> String {
+pub(crate) fn ago(now: u64, then: u64) -> String {
     let d = now.saturating_sub(then);
     if d < 60 {
         "just now".to_string()

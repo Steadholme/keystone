@@ -1,5 +1,6 @@
 //! HTTP handlers, one module per contract concern.
 
+pub mod admin;
 pub mod authorize;
 pub mod discovery;
 pub mod login;

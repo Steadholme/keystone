@@ -30,8 +30,8 @@ const NOTICE_HTML: &str = include_str!("../../templates/notice.html");
 
 /// Email-verification link lifetime (24h).
 const VERIFY_TTL: u64 = 24 * 3600;
-/// Password-reset link lifetime (1h).
-const RESET_TTL: u64 = 3600;
+/// Password-reset link lifetime (1h). Shared with the admin console's forced reset.
+pub(crate) const RESET_TTL: u64 = 3600;
 /// Minimum acceptable password length for self-service accounts.
 const MIN_PASSWORD_LEN: usize = 8;
 
@@ -462,7 +462,7 @@ fn error_html(error: Option<&str>) -> String {
 }
 
 /// Render the shared notice/confirmation page.
-fn notice(
+pub(crate) fn notice(
     status: StatusCode,
     title: &str,
     message: &str,

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Admin · HOLDFAST</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-console page-admin">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand brand--sm" href="/account" aria-label="HOLDFAST home">
+        <span class="brand__glyph" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="hf-shield-sm" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#818CF8"/>
+                <stop offset="1" stop-color="#4F46E5"/>
+              </linearGradient>
+            </defs>
+            <path d="M24 4 8 9.5V22c0 11 7 17.4 16 21.5C33 39.4 40 33 40 22V9.5L24 4Z" fill="url(#hf-shield-sm)"/>
+            <rect x="20" y="19" width="8" height="13" rx="1" fill="#fff" fill-opacity="0.92"/>
+            <path d="M20 19v-2.5a4 4 0 0 1 8 0V19" stroke="#fff" stroke-width="2" stroke-opacity="0.92" fill="none"/>
+          </svg>
+        </span>
+        <span class="brand__word">HOLDFAST</span>
+      </a>
+      <div class="topbar__right">
+        <span class="user-email">{{EMAIL}}</span>
+        <a class="btn btn-ghost btn-sm" href="/account">Account</a>
+        <form method="post" action="/logout" class="logout-form">
+          <input type="hidden" name="csrf_token" value="{{CSRF}}">
+          <button class="btn btn-ghost btn-sm" type="submit">Log out</button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <main class="console">
+    <div class="console__head">
+      <h1>Admin console</h1>
+      <p class="muted">Manage the keep's users and registered OAuth clients.</p>
+    </div>
+
+    <div class="card-stack">
+      <!-- Users -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Users</h2>
+          <span class="badge">{{USER_COUNT}} shown</span>
+        </div>
+        <div class="card__body">
+          <form method="get" action="/admin" class="admin-search">
+            <input type="text" name="q" value="{{QUERY}}"
+                   placeholder="Search by subject or email" aria-label="Search users">
+            <button class="btn btn-secondary" type="submit">Search</button>
+          </form>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Subject</th>
+                  <th>Email</th>
+                  <th>Verified</th>
+                  <th>Status</th>
+                  <th>Role</th>
+                  <th>Created</th>
+                  <th>Sessions</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{USER_ROWS}}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card__note">Disabling a user blocks new sign-ins immediately; revoke their sessions to end access they already hold. Reset links are single-use and expire in one hour.</div>
+      </section>
+
+      <!-- OAuth clients (read-only) -->
+      <section class="card">
+        <div class="card__head">
+          <h2>OAuth clients</h2>
+          <span class="badge">{{CLIENT_COUNT}} registered</span>
+        </div>
+        <div class="card__body">
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Client ID</th>
+                  <th>Name</th>
+                  <th>First-party</th>
+                  <th>Redirect URIs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{CLIENT_ROWS}}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card__note">Read-only. Clients are seeded at startup from configuration.</div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
