@@ -395,6 +395,11 @@ input[type="email"]:focus {
 .link-muted { color: var(--text-subtle); font-size: var(--fs-sm); font-weight: 500; }
 .link-muted:hover { color: var(--accent); }
 
+/* Field hint + auth-card foot helpers (self-service lifecycle pages). */
+.field__hint { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--text-subtle); }
+.auth-card__foot .muted { font-size: var(--fs-sm); color: var(--text-muted); }
+.auth-card__foot .dot { color: var(--text-subtle); margin: 0 var(--sp-1); }
+
 .site-foot {
   display: flex;
   align-items: center;

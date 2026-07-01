@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Sign in · HOLDFAST</title>
+  <title>Create account · HOLDFAST</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body class="page-auth">
@@ -31,11 +31,11 @@
           <span class="brand__word">HOLDFAST</span>
         </a>
         <p class="brand__tagline">Sovereign Identity</p>
-        <p class="brand__lede">Secure access to the keep.</p>
+        <p class="brand__lede">Create your access to the keep.</p>
         <ul class="trust-chips">
           <li class="chip">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.5 8.6 8 11 4.5-2.4 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
-            Passkey-secured
+            Passkey-ready
           </li>
           <li class="chip">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
@@ -56,50 +56,34 @@
     <main class="auth-main">
       <div class="auth-card">
         <header class="auth-card__head">
-          <h1 class="auth-card__title">Sign in to HOLDFAST</h1>
-          <p class="auth-card__sub">Use your passkey or password to continue.</p>
+          <h1 class="auth-card__title">Create your account</h1>
+          <p class="auth-card__sub">Register with your email and a password to get started.</p>
         </header>
 
-        <!-- aria-live region: server-rendered errors + dynamic alerts are announced -->
         <div class="alert-area" role="alert" aria-live="assertive">{{ERROR}}</div>
 
-        <form class="auth-form" method="post" action="/login">
+        <form class="auth-form" method="post" action="/register">
           <input type="hidden" name="csrf_token" value="{{CSRF}}">
-          <input type="hidden" name="return_to" value="{{RETURN_TO}}">
 
           <div class="field">
-            <label for="wa-username">Username or email</label>
-            <input id="wa-username" name="username" type="text" autocomplete="username"
-                   value="{{USERNAME}}" autocapitalize="none" spellcheck="false" required>
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email"
+                   value="{{EMAIL}}" autocapitalize="none" spellcheck="false" required>
           </div>
-
-          <!-- PRIMARY / hero action: passwordless passkey sign-in -->
-          <button id="passkey-login" class="btn btn-primary btn-block btn-hero" type="button"
-                  data-return-to="{{RETURN_TO}}">
-            <span class="btn-content">
-              <span class="btn-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11a4 4 0 0 0-4 4v1"/><path d="M16 15.5c0-2.2-1.8-4-4-4"/><path d="M12 7a4 4 0 0 1 4 4v3.5"/><path d="M7.5 8.5a6 6 0 0 1 9 .5"/><path d="M12 11v8"/><path d="M9 19.5c-.4-.8-.5-1.7-.5-2.5"/></svg>
-              </span>
-              <span>Sign in with a passkey</span>
-            </span>
-            <span class="spinner" aria-hidden="true"></span>
-          </button>
-          <div id="wa-status" class="status" role="status" aria-live="polite"></div>
-
-          <div class="divider"><span>or continue with password</span></div>
 
           <div class="field">
             <label for="password">Password</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <input id="password" name="password" type="password" autocomplete="new-password"
+                   minlength="8" required>
+            <p class="field__hint">At least 8 characters.</p>
           </div>
 
-          <button type="submit" class="btn btn-secondary btn-block">Sign in</button>
+          <button type="submit" class="btn btn-primary btn-block">Create account</button>
         </form>
 
         <div class="auth-card__foot">
-          <a class="link-muted" href="/forgot">Trouble signing in?</a>
-          <span class="dot" aria-hidden="true">·</span>
-          <a class="link-muted" href="/register">Create an account</a>
+          <span class="muted">Already have an account?</span>
+          <a class="link-muted" href="/login">Sign in</a>
         </div>
       </div>
 
@@ -112,6 +96,5 @@
       </footer>
     </main>
   </div>
-  <script src="/static/login.js"></script>
 </body>
 </html>

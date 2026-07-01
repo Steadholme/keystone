@@ -7,11 +7,13 @@
 pub mod audit;
 pub mod auth;
 pub mod config;
+pub mod email;
 pub mod error;
 pub mod handlers;
 pub mod jwt;
 pub mod keys;
 pub mod pkce;
+pub mod ratelimit;
 pub mod store;
 pub mod tls;
 pub mod webauthn;
@@ -25,7 +27,9 @@ use webauthn_rs::Webauthn;
 
 use crate::audit::AuditSink;
 use crate::config::Config;
+use crate::email::EmailSink;
 use crate::keys::SigningKey;
+use crate::ratelimit::RateLimiter;
 use crate::store::{InMemoryStore, PgStore, Store};
 
 /// Shared application state. Cheap to clone (everything behind `Arc`).
@@ -39,6 +43,11 @@ pub struct AppState {
     /// Non-blocking, fire-and-forget audit emitter -> Watchtower. Disabled (no-op) by
     /// default; enabled when `AUDIT_ENABLED` is on with a `WATCHTOWER_URL` + ingest token.
     pub audit: AuditSink,
+    /// Non-blocking, fire-and-forget transactional email emitter -> Corvid. Disabled
+    /// (log + skip) by default; enabled when `CORVID_SEND_URL` + `MAIL_SEND_TOKEN` are set.
+    pub email: EmailSink,
+    /// Per-IP token bucket throttling abuse-prone public POSTs (register / forgot).
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 /// Build the router wiring the OIDC contract endpoints + the login surface onto `state`.
@@ -61,7 +70,25 @@ pub fn app(state: AppState) -> Router {
             get(handlers::login::login_page).post(handlers::login::login_submit),
         )
         .route("/account", get(handlers::login::account_page))
+        .route(
+            "/account/password",
+            post(handlers::register::change_password),
+        )
         .route("/logout", post(handlers::login::logout))
+        // --- Public self-service identity lifecycle ---
+        .route(
+            "/register",
+            get(handlers::register::register_page).post(handlers::register::register_submit),
+        )
+        .route("/verify", get(handlers::register::verify))
+        .route(
+            "/forgot",
+            get(handlers::register::forgot_page).post(handlers::register::forgot_submit),
+        )
+        .route(
+            "/reset",
+            get(handlers::register::reset_page).post(handlers::register::reset_submit),
+        )
         .route("/static/{file}", get(handlers::static_assets::serve))
         // --- WebAuthn ceremonies ---
         .route(
@@ -101,6 +128,10 @@ pub fn build_dev_state() -> AppState {
         webauthn: Arc::new(webauthn),
         // Dev/test default: audit OFF (no-op sink) — unchanged behavior.
         audit: AuditSink::disabled(),
+        // Dev/test default: email OFF (log + skip) — registration/reset still succeed.
+        email: EmailSink::disabled(),
+        // Register/forgot throttle: 5 requests per IP per hour.
+        rate_limiter: Arc::new(RateLimiter::new(5, 3600)),
     }
 }
 
@@ -217,12 +248,21 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
         config.audit_ingest_token.as_deref(),
     );
 
+    // Non-blocking transactional email emitter. Built before `config` is moved into the Arc.
+    // Disabled (log + skip) unless both CORVID_SEND_URL and MAIL_SEND_TOKEN are set.
+    let email = EmailSink::start(
+        config.corvid_send_url.as_deref(),
+        config.mail_send_token.as_deref(),
+    );
+
     Ok(AppState {
         config: Arc::new(config),
         store,
         keys: Arc::new(keys),
         webauthn: Arc::new(webauthn),
         audit,
+        email,
+        rate_limiter: Arc::new(RateLimiter::new(5, 3600)),
     })
 }
 

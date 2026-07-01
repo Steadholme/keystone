@@ -18,6 +18,8 @@ use base64::Engine;
 use rand::rngs::OsRng;
 use rand::RngCore;
 
+use crate::now_secs;
+
 /// Registered client. `redirect_uris` is an EXACT-match list. `client_secret_hash`
 /// distinguishes the two client kinds:
 /// - `None`  -> PUBLIC client (PKCE-only, no secret) — e.g. `sluice-dev`. Unchanged.
@@ -46,11 +48,41 @@ impl Client {
 
 /// End user. Stable subject id + email, plus an optional Argon2 password hash
 /// (PHC string; `None` until a password is set).
+///
+/// `email_verified` gates password login for the public self-service lifecycle: a user
+/// created via `POST /register` starts unverified and cannot complete a password login
+/// until they click the emailed verification link. `created_at` is the epoch-seconds
+/// registration time (`0` for rows that predate the column — those are backfilled to
+/// verified on migration so seeded/manual accounts are never locked out).
 #[derive(Clone, Debug)]
 pub struct User {
     pub sub: String,
     pub email: String,
     pub password_hash: Option<String>,
+    pub email_verified: bool,
+    pub created_at: u64,
+}
+
+/// A single-use email verification / password-reset token. `kind` is `"verify"` (email
+/// confirmation) or `"reset"` (password reset). Consumed by delete-on-take, mirroring the
+/// authorization-code single-use pattern; `expires_at` is enforced inside the take.
+#[derive(Clone, Debug)]
+pub struct VerificationToken {
+    pub token: String,
+    pub sub: String,
+    pub kind: String,
+    pub expires_at: u64,
+}
+
+/// Outcome of a self-service `create_user`. The `EmailTaken` variant surfaces the
+/// `UNIQUE(email)` conflict as a typed value so the handler can render a friendly error
+/// (without leaking hard existence) instead of a generic 500.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateUserError {
+    /// The email is already registered.
+    EmailTaken,
+    /// A storage backend failure (logged at the store layer).
+    Backend,
 }
 
 /// A server-side login session. The opaque `id` is what the signed `__Host-session`
@@ -115,6 +147,23 @@ pub trait Store: Send + Sync {
     async fn get_user_by_username(&self, username: &str) -> Option<User>;
     /// Set (or replace) a user's Argon2 password hash.
     async fn set_password_hash(&self, sub: &str, hash: &str);
+    /// Create a self-service user (`email_verified=false`). Returns [`CreateUserError::EmailTaken`]
+    /// on the `UNIQUE(email)` conflict so registration can render a friendly, non-leaking error.
+    async fn create_user(
+        &self,
+        sub: &str,
+        email: &str,
+        password_hash: &str,
+        created_at: u64,
+    ) -> Result<(), CreateUserError>;
+    /// Mark a user's email as verified (idempotent).
+    async fn set_email_verified(&self, sub: &str);
+
+    /// Store a single-use verification/reset token.
+    async fn put_verification_token(&self, token: VerificationToken);
+    /// Atomically remove and return `(sub, kind)` for a still-valid token; `None` when the
+    /// token is absent, already consumed, or expired (single-use, mirrors [`Store::take_code`]).
+    async fn take_verification_token(&self, token: &str) -> Option<(String, String)>;
 
     async fn put_code(&self, code: AuthCode);
     /// Atomically remove and return the code (single-use consume); `None` if absent.
@@ -146,6 +195,7 @@ pub struct InMemoryStore {
     sessions: Mutex<HashMap<String, Session>>,
     credentials: Mutex<HashMap<String, Credential>>,
     states: Mutex<HashMap<String, WebauthnState>>,
+    verification_tokens: Mutex<HashMap<String, VerificationToken>>,
 }
 
 impl InMemoryStore {
@@ -213,6 +263,55 @@ impl Store for InMemoryStore {
         if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
             user.password_hash = Some(hash.to_string());
         }
+    }
+
+    async fn create_user(
+        &self,
+        sub: &str,
+        email: &str,
+        password_hash: &str,
+        created_at: u64,
+    ) -> Result<(), CreateUserError> {
+        let mut users = self.users.lock().expect("users lock poisoned");
+        if users.values().any(|u| u.email == email) {
+            return Err(CreateUserError::EmailTaken);
+        }
+        users.insert(
+            sub.to_string(),
+            User {
+                sub: sub.to_string(),
+                email: email.to_string(),
+                password_hash: Some(password_hash.to_string()),
+                email_verified: false,
+                created_at,
+            },
+        );
+        Ok(())
+    }
+
+    async fn set_email_verified(&self, sub: &str) {
+        if let Some(user) = self.users.lock().expect("users lock poisoned").get_mut(sub) {
+            user.email_verified = true;
+        }
+    }
+
+    async fn put_verification_token(&self, token: VerificationToken) {
+        self.verification_tokens
+            .lock()
+            .expect("verification_tokens lock poisoned")
+            .insert(token.token.clone(), token);
+    }
+
+    async fn take_verification_token(&self, token: &str) -> Option<(String, String)> {
+        let rec = self
+            .verification_tokens
+            .lock()
+            .expect("verification_tokens lock poisoned")
+            .remove(token)?;
+        if now_secs() > rec.expires_at {
+            return None;
+        }
+        Some((rec.sub, rec.kind))
     }
 
     async fn put_code(&self, code: AuthCode) {
@@ -370,6 +469,33 @@ impl PgStore {
         sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
             .execute(&self.pool)
             .await?;
+        // Additive, idempotent columns for the public self-service identity lifecycle.
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0")
+            .execute(&self.pool)
+            .await?;
+        // CRITICAL backfill: rows that predate `email_verified` (created_at still 0 — seeded or
+        // manually provisioned accounts like u_admin/w33d) are trusted and MUST stay able to log
+        // in. Flip them to verified once, right after the ALTERs. Idempotent: re-running only
+        // re-touches those same legacy rows (self-service users carry a real created_at > 0).
+        sqlx::query("UPDATE users SET email_verified = true WHERE created_at = 0")
+            .execute(&self.pool)
+            .await?;
+        // Single-use verification/reset tokens (delete-on-consume, mirrors auth_codes).
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS verification_tokens (\
+                 token TEXT PRIMARY KEY, \
+                 sub TEXT NOT NULL, \
+                 kind TEXT NOT NULL, \
+                 expires_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS auth_codes (\
                  code TEXT PRIMARY KEY, \
@@ -438,8 +564,10 @@ impl PgStore {
             .execute(&self.pool)
             .await?;
         }
+        // Seed the admin as verified (created_at=0) — a trusted, pre-provisioned account that
+        // must be able to log in on a brand-new database, before any backfill has rows to touch.
         sqlx::query(
-            "INSERT INTO users (sub, email) VALUES ($1, $2) \
+            "INSERT INTO users (sub, email, email_verified, created_at) VALUES ($1, $2, true, 0) \
              ON CONFLICT (sub) DO UPDATE SET email = EXCLUDED.email",
         )
         .bind(&user.sub)
@@ -502,18 +630,23 @@ impl PgStore {
     }
 
     fn user_from_row(row: &sqlx::postgres::PgRow) -> Result<User, sqlx::Error> {
+        let created_at: i64 = row.try_get("created_at")?;
         Ok(User {
             sub: row.try_get("sub")?,
             email: row.try_get("email")?,
             password_hash: row.try_get("password_hash")?,
+            email_verified: row.try_get("email_verified")?,
+            created_at: created_at as u64,
         })
     }
 
     async fn get_user_async(&self, sub: &str) -> Result<Option<User>, sqlx::Error> {
-        let row = sqlx::query("SELECT sub, email, password_hash FROM users WHERE sub = $1")
-            .bind(sub)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            "SELECT sub, email, password_hash, email_verified, created_at FROM users WHERE sub = $1",
+        )
+        .bind(sub)
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(Self::user_from_row).transpose()
     }
 
@@ -521,11 +654,13 @@ impl PgStore {
         &self,
         username: &str,
     ) -> Result<Option<User>, sqlx::Error> {
-        let row =
-            sqlx::query("SELECT sub, email, password_hash FROM users WHERE sub = $1 OR email = $1")
-                .bind(username)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query(
+            "SELECT sub, email, password_hash, email_verified, created_at FROM users \
+             WHERE sub = $1 OR email = $1",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(Self::user_from_row).transpose()
     }
 
@@ -536,6 +671,99 @@ impl PgStore {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Insert a self-service user (`email_verified=false`). A `UNIQUE(email)` violation is
+    /// mapped to [`CreateUserError::EmailTaken`]; any other failure is `Backend` (logged).
+    async fn create_user_async(
+        &self,
+        sub: &str,
+        email: &str,
+        password_hash: &str,
+        created_at: u64,
+    ) -> Result<(), CreateUserError> {
+        let res = sqlx::query(
+            "INSERT INTO users (sub, email, password_hash, email_verified, created_at) \
+             VALUES ($1, $2, $3, false, $4)",
+        )
+        .bind(sub)
+        .bind(email)
+        .bind(password_hash)
+        .bind(created_at as i64)
+        .execute(&self.pool)
+        .await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if e.as_database_error()
+                    .map(|db| db.is_unique_violation())
+                    .unwrap_or(false)
+                {
+                    Err(CreateUserError::EmailTaken)
+                } else {
+                    tracing::error!(error = %e, "pg create_user failed");
+                    Err(CreateUserError::Backend)
+                }
+            }
+        }
+    }
+
+    async fn set_email_verified_async(&self, sub: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET email_verified = true WHERE sub = $1")
+            .bind(sub)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn put_verification_token_async(
+        &self,
+        t: &VerificationToken,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO verification_tokens (token, sub, kind, expires_at) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (token) DO UPDATE SET sub = EXCLUDED.sub, kind = EXCLUDED.kind, \
+             expires_at = EXCLUDED.expires_at",
+        )
+        .bind(&t.token)
+        .bind(&t.sub)
+        .bind(&t.kind)
+        .bind(t.expires_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Atomic single-use consume of a verification token (read + DELETE in one transaction),
+    /// then an expiry check so an expired token is both discarded and reported absent.
+    async fn take_verification_token_async(
+        &self,
+        token: &str,
+    ) -> Result<Option<(String, String)>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT sub, kind, expires_at FROM verification_tokens WHERE token = $1",
+        )
+        .bind(token)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        let deleted = sqlx::query("DELETE FROM verification_tokens WHERE token = $1")
+            .bind(token)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        if deleted.rows_affected() != 1 {
+            return Ok(None);
+        }
+        let expires_at: i64 = row.try_get("expires_at")?;
+        if now_secs() > expires_at as u64 {
+            return Ok(None);
+        }
+        Ok(Some((row.try_get("sub")?, row.try_get("kind")?)))
     }
 
     async fn put_code_async(&self, code: &AuthCode) -> Result<(), sqlx::Error> {
@@ -779,6 +1007,38 @@ impl Store for PgStore {
         if let Err(e) = self.set_password_hash_async(sub, hash).await {
             tracing::error!(error = %e, "pg set_password_hash failed");
         }
+    }
+
+    async fn create_user(
+        &self,
+        sub: &str,
+        email: &str,
+        password_hash: &str,
+        created_at: u64,
+    ) -> Result<(), CreateUserError> {
+        self.create_user_async(sub, email, password_hash, created_at)
+            .await
+    }
+
+    async fn set_email_verified(&self, sub: &str) {
+        if let Err(e) = self.set_email_verified_async(sub).await {
+            tracing::error!(error = %e, "pg set_email_verified failed");
+        }
+    }
+
+    async fn put_verification_token(&self, token: VerificationToken) {
+        if let Err(e) = self.put_verification_token_async(&token).await {
+            tracing::error!(error = %e, "pg put_verification_token failed");
+        }
+    }
+
+    async fn take_verification_token(&self, token: &str) -> Option<(String, String)> {
+        self.take_verification_token_async(token)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg take_verification_token failed");
+                None
+            })
     }
 
     async fn put_code(&self, code: AuthCode) {

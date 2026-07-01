@@ -101,6 +101,24 @@ pub async fn login_submit(
     }
 
     let user = user.expect("verified implies user present");
+
+    // GATE: a self-service user who has not confirmed their email cannot complete a login
+    // (and therefore cannot reach any session-gated page, including /authorize). Seeded and
+    // pre-provisioned accounts are backfilled to verified, so this never locks them out.
+    if !user.email_verified {
+        state.audit.emit(AuditEvent::warning(
+            "login.unverified",
+            &user.email,
+            "password",
+            "email not verified",
+        ));
+        return reject_login(
+            &return_to,
+            &form.username,
+            "Please verify your email before signing in — check your inbox for the link.",
+        );
+    }
+
     let cookie = auth::create_session(&state, &user.sub).await;
     state.audit.emit(AuditEvent::info(
         "login.success",
@@ -210,7 +228,7 @@ fn sanitize_return_to(raw: Option<&str>) -> String {
 }
 
 /// Minimal HTML escaping for text/attribute interpolation.
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -218,13 +236,13 @@ fn esc(s: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-fn redirect(target: &str, cookies: &[String]) -> Response {
+pub(crate) fn redirect(target: &str, cookies: &[String]) -> Response {
     let mut resp = (StatusCode::FOUND, [(header::LOCATION, target.to_string())]).into_response();
     attach_cookies(&mut resp, cookies);
     resp
 }
 
-fn html_with_cookies(status: StatusCode, body: String, cookies: &[String]) -> Response {
+pub(crate) fn html_with_cookies(status: StatusCode, body: String, cookies: &[String]) -> Response {
     let mut resp = (status, Html(body)).into_response();
     attach_cookies(&mut resp, cookies);
     resp

@@ -43,6 +43,13 @@ pub const DEFAULT_INTERNAL_HEALTH_ADDR: &str = "127.0.0.1:8081";
 /// hop for v0; `/events` is appended by the emitter.
 pub const DEFAULT_WATCHTOWER_URL: &str = "http://watchtower:8500";
 
+/// Default public issuer origin (`PUBLIC_ISSUER`) used to build the verification/reset
+/// links emailed to users — the browser-facing origin, NOT the internal `issuer`.
+pub const DEFAULT_PUBLIC_ISSUER: &str = "https://sso.w33d.xyz";
+
+/// `From` address stamped on every transactional email Keystone sends.
+pub const MAIL_FROM: &str = "no-reply@w33d.xyz";
+
 /// Runtime configuration. `bind_addr` and `issuer` follow the shared dev contract.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -105,6 +112,14 @@ pub struct Config {
     /// Watchtower ingest bearer token (`AUDIT_INGEST_TOKEN`). When `None`, audit stays
     /// disabled even if `AUDIT_ENABLED=on`. Never logged.
     pub audit_ingest_token: Option<String>,
+    /// Public issuer origin (`PUBLIC_ISSUER`, default `https://sso.w33d.xyz`) — the base for
+    /// the verification/reset links emailed to users (browser-facing, not the internal issuer).
+    pub public_issuer: String,
+    /// Corvid mail-send endpoint URL (`CORVID_SEND_URL`, e.g. `http://corvid:8800/api/send`).
+    /// When `None`, transactional email is logged + skipped (never fails the request path).
+    pub corvid_send_url: Option<String>,
+    /// Corvid send bearer token (`MAIL_SEND_TOKEN`). When `None`, email stays disabled. Never logged.
+    pub mail_send_token: Option<String>,
 }
 
 impl Config {
@@ -135,6 +150,9 @@ impl Config {
             audit_enabled: false,
             watchtower_url: DEFAULT_WATCHTOWER_URL.to_string(),
             audit_ingest_token: None,
+            public_issuer: DEFAULT_PUBLIC_ISSUER.to_string(),
+            corvid_send_url: None,
+            mail_send_token: None,
         }
     }
 
@@ -203,6 +221,13 @@ impl Config {
         }
         // Never logged; only the bearer header to Watchtower carries it.
         config.audit_ingest_token = env_nonempty("AUDIT_INGEST_TOKEN");
+        // Public self-service identity lifecycle: browser-facing link base + Corvid mail hop.
+        if let Some(v) = env_nonempty("PUBLIC_ISSUER") {
+            config.public_issuer = v;
+        }
+        config.corvid_send_url = env_nonempty("CORVID_SEND_URL");
+        // Never logged; only the bearer header to Corvid carries it.
+        config.mail_send_token = env_nonempty("MAIL_SEND_TOKEN");
         config
     }
 
@@ -269,5 +294,9 @@ pub fn seed_user() -> User {
         sub: SEED_USER_SUB.to_string(),
         email: SEED_USER_EMAIL.to_string(),
         password_hash: None,
+        // Trusted pre-provisioned admin: verified so it can log in even before any migration
+        // backfill runs. `created_at=0` marks it as predating the self-service lifecycle.
+        email_verified: true,
+        created_at: 0,
     }
 }

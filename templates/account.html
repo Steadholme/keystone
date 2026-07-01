@@ -90,6 +90,28 @@
         </div>
         <div class="card__note">You are signed in to <code>{{SUB}}</code>. Sessions end automatically after inactivity or when you log out.</div>
       </section>
+
+      <!-- Change password -->
+      <section class="card">
+        <div class="card__head"><h2>Password</h2></div>
+        <div class="card__body">
+          <form class="auth-form" method="post" action="/account/password">
+            <input type="hidden" name="csrf_token" value="{{CSRF}}">
+            <div class="field">
+              <label for="current_password">Current password</label>
+              <input id="current_password" name="current_password" type="password"
+                     autocomplete="current-password" required>
+            </div>
+            <div class="field">
+              <label for="new_password">New password</label>
+              <input id="new_password" name="new_password" type="password"
+                     autocomplete="new-password" minlength="8" required>
+              <p class="field__hint">At least 8 characters.</p>
+            </div>
+            <button type="submit" class="btn btn-secondary">Update password</button>
+          </form>
+        </div>
+      </section>
     </div>
   </main>
   <script src="/static/login.js"></script>

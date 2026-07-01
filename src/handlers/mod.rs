@@ -3,6 +3,7 @@
 pub mod authorize;
 pub mod discovery;
 pub mod login;
+pub mod register;
 pub mod static_assets;
 pub mod token;
 pub mod userinfo;

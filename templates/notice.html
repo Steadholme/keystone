@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{TITLE}} · HOLDFAST</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-auth">
+  <div class="auth-split">
+    <aside class="brand-panel">
+      <div class="brand-panel__inner">
+        <a class="brand" href="/login" aria-label="HOLDFAST home">
+          <span class="brand__glyph" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="hf-shield" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#818CF8"/>
+                  <stop offset="1" stop-color="#4F46E5"/>
+                </linearGradient>
+              </defs>
+              <path d="M24 4 8 9.5V22c0 11 7 17.4 16 21.5C33 39.4 40 33 40 22V9.5L24 4Z" fill="url(#hf-shield)"/>
+              <path d="M24 8.4 12 12.6V22c0 8.6 5.3 13.9 12 17.4 6.7-3.5 12-8.8 12-17.4v-9.4L24 8.4Z" fill="#0F172A" fill-opacity="0.18"/>
+              <rect x="20" y="19" width="8" height="13" rx="1" fill="#fff" fill-opacity="0.92"/>
+              <path d="M20 19v-2.5a4 4 0 0 1 8 0V19" stroke="#fff" stroke-width="2" stroke-opacity="0.92" fill="none"/>
+              <circle cx="24" cy="24.5" r="1.6" fill="#4F46E5"/>
+            </svg>
+          </span>
+          <span class="brand__word">HOLDFAST</span>
+        </a>
+        <p class="brand__tagline">Sovereign Identity</p>
+        <p class="brand__lede">Secure access to the keep.</p>
+      </div>
+      <svg class="brand-watermark" viewBox="0 0 48 48" fill="currentColor" aria-hidden="true">
+        <path d="M24 2 6 8v14c0 12.6 8 19.8 18 24 10-4.2 18-11.4 18-24V8L24 2Zm0 6.1L36 12v10c0 9.6-6 15.5-12 18.6C18 37.5 12 31.6 12 22V12l12-3.9Z"/>
+      </svg>
+    </aside>
+
+    <main class="auth-main">
+      <div class="auth-card">
+        <header class="auth-card__head">
+          <h1 class="auth-card__title">{{TITLE}}</h1>
+          <p class="auth-card__sub">{{MESSAGE}}</p>
+        </header>
+
+        <a class="btn btn-primary btn-block" href="{{LINK_HREF}}">{{LINK_TEXT}}</a>
+      </div>
+
+      <footer class="site-foot">
+        <span>© HOLDFAST</span>
+        <span class="dot" aria-hidden="true">·</span>
+        <a href="#">Status</a>
+        <span class="dot" aria-hidden="true">·</span>
+        <a href="#">Privacy</a>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
