@@ -93,6 +93,12 @@ pub struct Session {
     pub user_sub: String,
     pub created_at: u64,
     pub expires_at: u64,
+    /// `User-Agent` captured at sign-in (best-effort device label). Empty when unknown.
+    pub user_agent: String,
+    /// Forwarded client IP captured at sign-in. Empty/`unknown` when not resolvable.
+    pub ip: String,
+    /// Unix seconds of the last time this session was seen active. `0` = never touched.
+    pub last_seen: u64,
 }
 
 /// A registered WebAuthn passkey. `passkey` is the serde-JSON of webauthn-rs' `Passkey`
@@ -172,6 +178,14 @@ pub trait Store: Send + Sync {
     async fn put_session(&self, session: Session);
     async fn get_session(&self, id: &str) -> Option<Session>;
     async fn delete_session(&self, id: &str);
+    /// All non-expired sessions for a user, newest first (drives the account page).
+    async fn list_sessions(&self, user_sub: &str) -> Vec<Session>;
+    /// Delete session `id` only if it belongs to `user_sub` (revoke one device).
+    async fn revoke_session(&self, user_sub: &str, id: &str);
+    /// Delete every session for `user_sub` except `keep_id` (log out all other devices).
+    async fn revoke_other_sessions(&self, user_sub: &str, keep_id: &str);
+    /// Bump `last_seen` for an active session (best-effort activity tracking).
+    async fn touch_session(&self, id: &str, last_seen: u64);
 
     async fn put_credential(&self, cred: Credential);
     /// All passkeys registered to a user (for authentication + exclude lists).
@@ -347,6 +361,46 @@ impl Store for InMemoryStore {
             .remove(id);
     }
 
+    async fn list_sessions(&self, user_sub: &str) -> Vec<Session> {
+        let now = now_secs();
+        let mut v: Vec<Session> = self
+            .sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .values()
+            .filter(|s| s.user_sub == user_sub && s.expires_at > now)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
+    }
+
+    async fn revoke_session(&self, user_sub: &str, id: &str) {
+        let mut g = self.sessions.lock().expect("sessions lock poisoned");
+        // Ownership check: never let one user delete another user's session id.
+        if g.get(id).is_some_and(|s| s.user_sub == user_sub) {
+            g.remove(id);
+        }
+    }
+
+    async fn revoke_other_sessions(&self, user_sub: &str, keep_id: &str) {
+        self.sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .retain(|id, s| s.user_sub != user_sub || id == keep_id);
+    }
+
+    async fn touch_session(&self, id: &str, last_seen: u64) {
+        if let Some(s) = self
+            .sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .get_mut(id)
+        {
+            s.last_seen = last_seen;
+        }
+    }
+
     async fn put_credential(&self, cred: Credential) {
         self.credentials
             .lock()
@@ -515,11 +569,25 @@ impl PgStore {
                  id TEXT PRIMARY KEY, \
                  user_sub TEXT NOT NULL, \
                  created_at BIGINT NOT NULL, \
-                 expires_at BIGINT NOT NULL\
+                 expires_at BIGINT NOT NULL, \
+                 user_agent TEXT NOT NULL DEFAULT '', \
+                 ip TEXT NOT NULL DEFAULT '', \
+                 last_seen BIGINT NOT NULL DEFAULT 0\
              )",
         )
         .execute(&self.pool)
         .await?;
+        // Session metadata columns are additive: back-fill onto pre-existing tables so the
+        // account page can render device/IP/last-seen for sessions minted before this change.
+        sqlx::query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen BIGINT NOT NULL DEFAULT 0")
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS webauthn_credentials (\
                  cred_id TEXT PRIMARY KEY, \
@@ -637,6 +705,21 @@ impl PgStore {
             password_hash: row.try_get("password_hash")?,
             email_verified: row.try_get("email_verified")?,
             created_at: created_at as u64,
+        })
+    }
+
+    fn session_from_row(row: &sqlx::postgres::PgRow) -> Result<Session, sqlx::Error> {
+        let created_at: i64 = row.try_get("created_at")?;
+        let expires_at: i64 = row.try_get("expires_at")?;
+        let last_seen: i64 = row.try_get("last_seen")?;
+        Ok(Session {
+            id: row.try_get("id")?,
+            user_sub: row.try_get("user_sub")?,
+            created_at: created_at as u64,
+            expires_at: expires_at as u64,
+            user_agent: row.try_get("user_agent")?,
+            ip: row.try_get("ip")?,
+            last_seen: last_seen as u64,
         })
     }
 
@@ -827,38 +910,83 @@ impl PgStore {
 
     async fn put_session_async(&self, s: &Session) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO sessions (id, user_sub, created_at, expires_at) VALUES ($1, $2, $3, $4) \
+            "INSERT INTO sessions (id, user_sub, created_at, expires_at, user_agent, ip, last_seen) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
              ON CONFLICT (id) DO UPDATE SET user_sub = EXCLUDED.user_sub, \
-             created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at",
+             created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at, \
+             user_agent = EXCLUDED.user_agent, ip = EXCLUDED.ip, last_seen = EXCLUDED.last_seen",
         )
         .bind(&s.id)
         .bind(&s.user_sub)
         .bind(s.created_at as i64)
         .bind(s.expires_at as i64)
+        .bind(&s.user_agent)
+        .bind(&s.ip)
+        .bind(s.last_seen as i64)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
     async fn get_session_async(&self, id: &str) -> Result<Option<Session>, sqlx::Error> {
-        let row =
-            sqlx::query("SELECT id, user_sub, created_at, expires_at FROM sessions WHERE id = $1")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query(
+            "SELECT id, user_sub, created_at, expires_at, user_agent, ip, last_seen \
+             FROM sessions WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(row) = row else { return Ok(None) };
-        let created_at: i64 = row.try_get("created_at")?;
-        let expires_at: i64 = row.try_get("expires_at")?;
-        Ok(Some(Session {
-            id: row.try_get("id")?,
-            user_sub: row.try_get("user_sub")?,
-            created_at: created_at as u64,
-            expires_at: expires_at as u64,
-        }))
+        Ok(Some(Self::session_from_row(&row)?))
     }
 
     async fn delete_session_async(&self, id: &str) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM sessions WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn list_sessions_async(&self, user_sub: &str) -> Result<Vec<Session>, sqlx::Error> {
+        let now = now_secs() as i64;
+        let rows = sqlx::query(
+            "SELECT id, user_sub, created_at, expires_at, user_agent, ip, last_seen \
+             FROM sessions WHERE user_sub = $1 AND expires_at > $2 ORDER BY created_at DESC",
+        )
+        .bind(user_sub)
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(Self::session_from_row).collect()
+    }
+
+    async fn revoke_session_async(&self, user_sub: &str, id: &str) -> Result<(), sqlx::Error> {
+        // Ownership is enforced in SQL: the row is deleted only when both id and owner match.
+        sqlx::query("DELETE FROM sessions WHERE id = $1 AND user_sub = $2")
+            .bind(id)
+            .bind(user_sub)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn revoke_other_sessions_async(
+        &self,
+        user_sub: &str,
+        keep_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM sessions WHERE user_sub = $1 AND id <> $2")
+            .bind(user_sub)
+            .bind(keep_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn touch_session_async(&self, id: &str, last_seen: u64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE sessions SET last_seen = $1 WHERE id = $2")
+            .bind(last_seen as i64)
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -1070,6 +1198,31 @@ impl Store for PgStore {
     async fn delete_session(&self, id: &str) {
         if let Err(e) = self.delete_session_async(id).await {
             tracing::error!(error = %e, "pg delete_session failed");
+        }
+    }
+
+    async fn list_sessions(&self, user_sub: &str) -> Vec<Session> {
+        self.list_sessions_async(user_sub).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg list_sessions failed");
+            Vec::new()
+        })
+    }
+
+    async fn revoke_session(&self, user_sub: &str, id: &str) {
+        if let Err(e) = self.revoke_session_async(user_sub, id).await {
+            tracing::error!(error = %e, "pg revoke_session failed");
+        }
+    }
+
+    async fn revoke_other_sessions(&self, user_sub: &str, keep_id: &str) {
+        if let Err(e) = self.revoke_other_sessions_async(user_sub, keep_id).await {
+            tracing::error!(error = %e, "pg revoke_other_sessions failed");
+        }
+    }
+
+    async fn touch_session(&self, id: &str, last_seen: u64) {
+        if let Err(e) = self.touch_session_async(id, last_seen).await {
+            tracing::error!(error = %e, "pg touch_session failed");
         }
     }
 

@@ -103,7 +103,15 @@ pub fn verify_signed(secret: &str, value: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Create + persist a session for `user_sub`; returns the signed cookie value.
-pub async fn create_session(state: &AppState, user_sub: &str) -> String {
+///
+/// `user_agent`/`ip` are captured for the session-management UI (best-effort device labels);
+/// pass empty strings when unavailable. `last_seen` starts at the creation time.
+pub async fn create_session(
+    state: &AppState,
+    user_sub: &str,
+    user_agent: &str,
+    ip: &str,
+) -> String {
     let id = new_opaque_code();
     let now = now_secs();
     state
@@ -113,6 +121,9 @@ pub async fn create_session(state: &AppState, user_sub: &str) -> String {
             user_sub: user_sub.to_string(),
             created_at: now,
             expires_at: now + state.config.session_ttl,
+            user_agent: user_agent.to_string(),
+            ip: ip.to_string(),
+            last_seen: now,
         })
         .await;
     signed_value(&state.config.session_secret, &id)
@@ -124,9 +135,15 @@ pub async fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Se
     let raw = get_cookie(headers, SESSION_COOKIE)?;
     let id = verify_signed(&state.config.session_secret, &raw)?;
     let session = state.store.get_session(&id).await?;
-    if now_secs() > session.expires_at {
+    let now = now_secs();
+    if now > session.expires_at {
         state.store.delete_session(&id).await;
         return None;
+    }
+    // Best-effort activity tracking: bump `last_seen` at most once a minute so the account
+    // page can surface "last active" without a write on every OIDC hop.
+    if now.saturating_sub(session.last_seen) >= 60 {
+        state.store.touch_session(&id, now).await;
     }
     Some(session)
 }

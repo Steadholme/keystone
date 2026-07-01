@@ -75,6 +75,14 @@ pub fn app(state: AppState) -> Router {
             post(handlers::register::change_password),
         )
         .route("/logout", post(handlers::login::logout))
+        .route(
+            "/account/sessions/revoke",
+            post(handlers::login::revoke_session),
+        )
+        .route(
+            "/account/sessions/revoke-all",
+            post(handlers::login::revoke_other_sessions),
+        )
         // --- Public self-service identity lifecycle ---
         .route(
             "/register",

@@ -138,12 +138,33 @@ async fn pg_store_full_integration() {
         user_sub: "u_admin".to_string(),
         created_at: now_secs(),
         expires_at: now_secs() + 3600,
+        user_agent: "pg-test-agent".to_string(),
+        ip: "10.0.0.1".to_string(),
+        last_seen: now_secs(),
     };
     state.store.put_session(sess.clone()).await;
     assert_eq!(
         state.store.get_session(&sess.id).await.map(|s| s.user_sub),
         Some("u_admin".to_string())
     );
+    // metadata round-trips through the DB.
+    let fetched = state.store.get_session(&sess.id).await.unwrap();
+    assert_eq!(fetched.user_agent, "pg-test-agent");
+    assert_eq!(fetched.ip, "10.0.0.1");
+    // list_sessions surfaces it; revoke_other keeps a different id and drops this one.
+    assert!(state
+        .store
+        .list_sessions("u_admin")
+        .await
+        .iter()
+        .any(|s| s.id == sess.id));
+    state.store.revoke_other_sessions("u_admin", "some-other-id").await;
+    assert!(
+        state.store.get_session(&sess.id).await.is_none(),
+        "revoke_other_sessions removed the non-kept session"
+    );
+    // re-put for the delete_session assertion below.
+    state.store.put_session(sess.clone()).await;
     state.store.delete_session(&sess.id).await;
     assert!(
         state.store.get_session(&sess.id).await.is_none(),
@@ -269,7 +290,7 @@ async fn authorize_ok(state: &AppState) -> (String, String) {
          &code_challenge_method=S256&nonce=n-abc"
     );
     // `/authorize` now gates on a session; establish one for the seeded admin.
-    let session_cookie = keystone::auth::create_session(state, "u_admin").await;
+    let session_cookie = keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
     let req = Request::builder()
         .uri(uri)
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))

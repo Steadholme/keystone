@@ -65,7 +65,7 @@ async fn passkey_register_then_authenticate_end_to_end() {
     let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
 
     // --- Registration (session-protected) ----------------------------------
-    let session = keystone::auth::create_session(&state, "u_admin").await;
+    let session = keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
     let reg_cookie = format!("__Host-session={session}; __Host-csrf={CSRF}");
 
     let (status, headers, body) = call(

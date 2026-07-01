@@ -255,7 +255,13 @@ pub async fn authenticate_finish(
         .await
         .map(|u| u.email)
         .unwrap_or_else(|| stored.user_sub.clone());
-    let session_cookie = auth::create_session(&state, &stored.user_sub).await;
+    let session_cookie = auth::create_session(
+        &state,
+        &stored.user_sub,
+        &crate::handlers::login::user_agent(&headers),
+        &crate::handlers::register::client_ip(&headers),
+    )
+    .await;
     state.audit.emit(AuditEvent::info(
         "webauthn.authenticate.success",
         &actor,

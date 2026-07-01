@@ -91,6 +91,22 @@
         <div class="card__note">You are signed in to <code>{{SUB}}</code>. Sessions end automatically after inactivity or when you log out.</div>
       </section>
 
+      <!-- Active sessions -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Active sessions</h2>
+          <span class="badge">{{SESSION_COUNT}} active</span>
+        </div>
+        <div class="card__body">
+          <p class="muted">Devices currently signed in to your account. End any you don't recognize.</p>
+          <div class="session-list">
+            {{SESSIONS}}
+          </div>
+          {{REVOKE_ALL}}
+        </div>
+        <div class="card__note">Ending a session signs that device out of single sign-on. Access it already holds to apps may persist until those sessions expire (up to 8 hours).</div>
+      </section>
+
       <!-- Change password -->
       <section class="card">
         <div class="card__head"><h2>Password</h2></div>

@@ -123,7 +123,7 @@ async fn authorize_without_session_redirects_to_login() {
     );
 
     // With a session -> 302 straight back to the redirect_uri with a code.
-    let session = keystone::auth::create_session(&state, "u_admin").await;
+    let session = keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
     let (status, headers, _) = call(
         &state,
         get_with_cookie(&authorize_uri(), &format!("__Host-session={session}")),
@@ -218,6 +218,91 @@ async fn login_with_wrong_password_is_rejected_no_session() {
         cookie_value(&headers, "__Host-session").is_none(),
         "no session granted"
     );
+}
+
+#[tokio::test]
+async fn account_lists_sessions_and_revoke_all_keeps_current() {
+    let state = keystone::build_dev_state();
+
+    // Two independent sessions for the same user (two "devices").
+    let sess_a = keystone::auth::create_session(
+        &state,
+        "u_admin",
+        "Mozilla/5.0 (Windows NT 10.0) Chrome/120",
+        "203.0.113.1",
+    )
+    .await;
+    let sess_b = keystone::auth::create_session(
+        &state,
+        "u_admin",
+        "Mozilla/5.0 (iPhone) Safari/17",
+        "203.0.113.2",
+    )
+    .await;
+    let cookie_a = format!("__Host-session={sess_a}");
+    let cookie_b = format!("__Host-session={sess_b}");
+
+    // /account from device A lists BOTH sessions and badges the current one.
+    let (status, headers, body) = call(&state, get_with_cookie("/account", &cookie_a)).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("Chrome · Windows"), "device A labelled: {html:.0}");
+    assert!(html.contains("Safari · iOS"), "device B labelled");
+    assert!(html.contains("This device"), "current session badged");
+    assert!(html.contains("2 active"), "session count shown");
+
+    // A fresh CSRF cookie/token was issued by the account render — reuse it to POST.
+    let csrf = cookie_value(&headers, "__Host-csrf").expect("csrf issued");
+
+    // "Log out all other devices" from A: keeps A, drops B.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/account/sessions/revoke-all")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::COOKIE, format!("{cookie_a}; __Host-csrf={csrf}"))
+        .body(Body::from(format!("csrf_token={csrf}")))
+        .unwrap();
+    let (status, headers, _) = call(&state, req).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(location(&headers), "/account");
+
+    // A still works; B is gone (its /account now bounces to /login).
+    let (status, _, _) = call(&state, get_with_cookie("/account", &cookie_a)).await;
+    assert_eq!(status, StatusCode::OK, "current session survives revoke-all");
+    let (status, headers, _) = call(&state, get_with_cookie("/account", &cookie_b)).await;
+    assert_eq!(status, StatusCode::FOUND, "other session was revoked");
+    assert_eq!(location(&headers), "/login");
+}
+
+#[tokio::test]
+async fn revoke_one_session_by_id_is_owner_scoped() {
+    let state = keystone::build_dev_state();
+    let sess_a = keystone::auth::create_session(&state, "u_admin", "Chrome/120", "203.0.113.1").await;
+    let sess_b = keystone::auth::create_session(&state, "u_admin", "Safari/17", "203.0.113.2").await;
+    let cookie_a = format!("__Host-session={sess_a}");
+
+    // Discover B's opaque id from A's account listing (it is embedded in the revoke form).
+    let (_, headers, _) = call(&state, get_with_cookie("/account", &cookie_a)).await;
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    // B's raw id: the signed cookie is `id.mac`; the store id is the part before the dot.
+    let b_id = sess_b.split('.').next().unwrap().to_string();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/account/sessions/revoke")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::COOKIE, format!("{cookie_a}; __Host-csrf={csrf}"))
+        .body(Body::from(format!("csrf_token={csrf}&session_id={b_id}")))
+        .unwrap();
+    let (status, _, _) = call(&state, req).await;
+    assert_eq!(status, StatusCode::FOUND);
+
+    // B is gone; A survives.
+    let cookie_b = format!("__Host-session={sess_b}");
+    let (status, _, _) = call(&state, get_with_cookie("/account", &cookie_b)).await;
+    assert_eq!(status, StatusCode::FOUND, "targeted session revoked");
+    let (status, _, _) = call(&state, get_with_cookie("/account", &cookie_a)).await;
+    assert_eq!(status, StatusCode::OK, "actor session untouched");
 }
 
 #[tokio::test]

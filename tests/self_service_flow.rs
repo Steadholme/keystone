@@ -240,7 +240,7 @@ async fn change_password_requires_correct_current_password() {
         .await
         .unwrap();
     state.store.set_email_verified("usr_chg").await;
-    let session = keystone::auth::create_session(&state, "usr_chg").await;
+    let session = keystone::auth::create_session(&state, "usr_chg", "test-agent", "127.0.0.1").await;
     let session_cookie = format!("__Host-session={session}");
 
     // Grab a CSRF token from the authenticated account page.

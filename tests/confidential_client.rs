@@ -57,7 +57,7 @@ async fn authorize_code(state: &AppState, client_id: &str, redirect_uri: &str) -
          &scope=openid+email+profile&state=xyz&code_challenge={CHALLENGE}\
          &code_challenge_method=S256&nonce=n-gw"
     );
-    let session_cookie = keystone::auth::create_session(state, "u_admin").await;
+    let session_cookie = keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
     let req = Request::builder()
         .uri(uri)
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))

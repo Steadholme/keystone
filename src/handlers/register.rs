@@ -528,7 +528,7 @@ fn valid_email(email: &str) -> bool {
 /// Derive a throttling key from the forwarded client IP (Keystone sits behind Sluice, which
 /// sets `X-Forwarded-For`). Falls back to `X-Real-IP`, then a shared bucket when neither is
 /// present — so the limiter still applies (globally) rather than silently disabling.
-fn client_ip(headers: &HeaderMap) -> String {
+pub(crate) fn client_ip(headers: &HeaderMap) -> String {
     if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         if let Some(first) = xff.split(',').next() {
             let ip = first.trim();
