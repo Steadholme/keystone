@@ -122,6 +122,64 @@ pub struct Credential {
     pub created_at: u64,
 }
 
+/// Optional TOTP second-factor configuration. `enabled=false` means enrollment has
+/// started but the first authenticator code has not been verified yet.
+#[derive(Clone, Debug)]
+pub struct TotpConfig {
+    pub user_sub: String,
+    pub secret: String,
+    pub enabled: bool,
+    pub created_at: u64,
+    pub verified_at: u64,
+}
+
+/// One hashed, single-use recovery code for TOTP account recovery.
+#[derive(Clone, Debug)]
+pub struct TotpRecoveryCode {
+    pub user_sub: String,
+    pub code_hash: String,
+    pub created_at: u64,
+}
+
+/// Short-lived password-accepted, TOTP-pending login challenge.
+#[derive(Clone, Debug)]
+pub struct TotpChallenge {
+    pub id: String,
+    pub user_sub: String,
+    pub return_to: String,
+    pub user_agent: String,
+    pub ip: String,
+    pub expires_at: u64,
+}
+
+/// Per-account login history row. `result` is `"success"`, `"failure"`, or `"challenge"`.
+#[derive(Clone, Debug)]
+pub struct LoginEvent {
+    pub id: String,
+    pub user_sub: String,
+    pub username: String,
+    pub occurred_at: u64,
+    pub ip: String,
+    pub user_agent: String,
+    pub method: String,
+    pub result: String,
+    pub detail: String,
+}
+
+/// Personal access token metadata. Only `token_hash` is persisted; plaintext is shown once.
+#[derive(Clone, Debug)]
+pub struct PersonalAccessToken {
+    pub id: String,
+    pub user_sub: String,
+    pub name: String,
+    pub token_hash: String,
+    pub scopes: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    /// `0` = active/not revoked.
+    pub revoked_at: u64,
+}
+
 /// Short-lived server-side state for an in-flight WebAuthn ceremony. `state` is the
 /// serde-JSON of `PasskeyRegistration` or `PasskeyAuthentication`; `kind` is `"reg"`/`"auth"`.
 #[derive(Clone, Debug)]
@@ -218,6 +276,36 @@ pub trait Store: Send + Sync {
     /// Replace a credential's serialised passkey (counter update after each auth).
     async fn update_credential_passkey(&self, cred_id: &str, passkey: &str);
 
+    /// Optional TOTP configuration for a user.
+    async fn get_totp(&self, user_sub: &str) -> Option<TotpConfig>;
+    /// Insert or replace a TOTP configuration (pending or enabled).
+    async fn put_totp(&self, config: TotpConfig);
+    /// Remove TOTP and all recovery codes for a user.
+    async fn delete_totp(&self, user_sub: &str);
+    /// Replace all recovery codes for a user with fresh hashed codes.
+    async fn put_recovery_codes(&self, user_sub: &str, code_hashes: Vec<String>, created_at: u64);
+    /// Number of unused recovery codes left for a user.
+    async fn recovery_code_count(&self, user_sub: &str) -> usize;
+    /// Consume one recovery code by hash. Returns true only when it existed for this user.
+    async fn take_recovery_code(&self, user_sub: &str, code_hash: &str) -> bool;
+
+    /// Store a short-lived password-accepted TOTP challenge.
+    async fn put_totp_challenge(&self, challenge: TotpChallenge);
+    /// Atomically consume a TOTP challenge.
+    async fn take_totp_challenge(&self, id: &str) -> Option<TotpChallenge>;
+
+    /// Append a per-account login history event.
+    async fn put_login_event(&self, event: LoginEvent);
+    /// Newest login events for a user, bounded by `limit`.
+    async fn list_login_events(&self, user_sub: &str, limit: usize) -> Vec<LoginEvent>;
+
+    /// Store a hashed personal access token.
+    async fn put_personal_token(&self, token: PersonalAccessToken);
+    /// Tokens for a user, newest first. Revoked tokens are not returned.
+    async fn list_personal_tokens(&self, user_sub: &str) -> Vec<PersonalAccessToken>;
+    /// Revoke one token only if it belongs to `user_sub`.
+    async fn revoke_personal_token(&self, user_sub: &str, id: &str, revoked_at: u64);
+
     async fn put_state(&self, state: WebauthnState);
     /// Atomically remove and return ceremony state (single-use); `None` if absent.
     async fn take_state(&self, id: &str) -> Option<WebauthnState>;
@@ -231,6 +319,11 @@ pub struct InMemoryStore {
     codes: Mutex<HashMap<String, AuthCode>>,
     sessions: Mutex<HashMap<String, Session>>,
     credentials: Mutex<HashMap<String, Credential>>,
+    totp: Mutex<HashMap<String, TotpConfig>>,
+    recovery_codes: Mutex<HashMap<(String, String), TotpRecoveryCode>>,
+    totp_challenges: Mutex<HashMap<String, TotpChallenge>>,
+    login_events: Mutex<Vec<LoginEvent>>,
+    personal_tokens: Mutex<HashMap<String, PersonalAccessToken>>,
     states: Mutex<HashMap<String, WebauthnState>>,
     verification_tokens: Mutex<HashMap<String, VerificationToken>>,
     /// Consent record keyed by `(user_sub, client_id)` -> (granted scope, granted_at).
@@ -362,7 +455,11 @@ impl Store for InMemoryStore {
             .values()
             .cloned()
             .collect();
-        v.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.sub.cmp(&b.sub)));
+        v.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.sub.cmp(&b.sub))
+        });
         v
     }
 
@@ -518,6 +615,140 @@ impl Store for InMemoryStore {
         }
     }
 
+    async fn get_totp(&self, user_sub: &str) -> Option<TotpConfig> {
+        self.totp
+            .lock()
+            .expect("totp lock poisoned")
+            .get(user_sub)
+            .cloned()
+    }
+
+    async fn put_totp(&self, config: TotpConfig) {
+        self.totp
+            .lock()
+            .expect("totp lock poisoned")
+            .insert(config.user_sub.clone(), config);
+    }
+
+    async fn delete_totp(&self, user_sub: &str) {
+        self.totp
+            .lock()
+            .expect("totp lock poisoned")
+            .remove(user_sub);
+        self.recovery_codes
+            .lock()
+            .expect("recovery_codes lock poisoned")
+            .retain(|(sub, _), _| sub != user_sub);
+    }
+
+    async fn put_recovery_codes(&self, user_sub: &str, code_hashes: Vec<String>, created_at: u64) {
+        let mut g = self
+            .recovery_codes
+            .lock()
+            .expect("recovery_codes lock poisoned");
+        g.retain(|(sub, _), _| sub != user_sub);
+        for code_hash in code_hashes {
+            g.insert(
+                (user_sub.to_string(), code_hash.clone()),
+                TotpRecoveryCode {
+                    user_sub: user_sub.to_string(),
+                    code_hash,
+                    created_at,
+                },
+            );
+        }
+    }
+
+    async fn recovery_code_count(&self, user_sub: &str) -> usize {
+        self.recovery_codes
+            .lock()
+            .expect("recovery_codes lock poisoned")
+            .values()
+            .filter(|c| c.user_sub == user_sub)
+            .count()
+    }
+
+    async fn take_recovery_code(&self, user_sub: &str, code_hash: &str) -> bool {
+        self.recovery_codes
+            .lock()
+            .expect("recovery_codes lock poisoned")
+            .remove(&(user_sub.to_string(), code_hash.to_string()))
+            .is_some()
+    }
+
+    async fn put_totp_challenge(&self, challenge: TotpChallenge) {
+        self.totp_challenges
+            .lock()
+            .expect("totp_challenges lock poisoned")
+            .insert(challenge.id.clone(), challenge);
+    }
+
+    async fn take_totp_challenge(&self, id: &str) -> Option<TotpChallenge> {
+        let challenge = self
+            .totp_challenges
+            .lock()
+            .expect("totp_challenges lock poisoned")
+            .remove(id)?;
+        if now_secs() > challenge.expires_at {
+            return None;
+        }
+        Some(challenge)
+    }
+
+    async fn put_login_event(&self, event: LoginEvent) {
+        self.login_events
+            .lock()
+            .expect("login_events lock poisoned")
+            .push(event);
+    }
+
+    async fn list_login_events(&self, user_sub: &str, limit: usize) -> Vec<LoginEvent> {
+        let mut v: Vec<LoginEvent> = self
+            .login_events
+            .lock()
+            .expect("login_events lock poisoned")
+            .iter()
+            .filter(|e| e.user_sub == user_sub)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| b.occurred_at.cmp(&a.occurred_at));
+        v.truncate(limit);
+        v
+    }
+
+    async fn put_personal_token(&self, token: PersonalAccessToken) {
+        self.personal_tokens
+            .lock()
+            .expect("personal_tokens lock poisoned")
+            .insert(token.id.clone(), token);
+    }
+
+    async fn list_personal_tokens(&self, user_sub: &str) -> Vec<PersonalAccessToken> {
+        let mut v: Vec<PersonalAccessToken> = self
+            .personal_tokens
+            .lock()
+            .expect("personal_tokens lock poisoned")
+            .values()
+            .filter(|t| t.user_sub == user_sub && t.revoked_at == 0)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
+    }
+
+    async fn revoke_personal_token(&self, user_sub: &str, id: &str, revoked_at: u64) {
+        if let Some(token) = self
+            .personal_tokens
+            .lock()
+            .expect("personal_tokens lock poisoned")
+            .get_mut(id)
+        {
+            if token.user_sub == user_sub {
+                token.revoked_at = revoked_at;
+            }
+        }
+    }
+
     async fn put_state(&self, state: WebauthnState) {
         self.states
             .lock()
@@ -629,9 +860,11 @@ impl PgStore {
         )
         .execute(&self.pool)
         .await?;
-        sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0",
+        )
+        .execute(&self.pool)
+        .await?;
         // Additive, idempotent columns for the `/admin` operator console.
         sqlx::query(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false",
@@ -695,15 +928,81 @@ impl PgStore {
         .await?;
         // Session metadata columns are additive: back-fill onto pre-existing tables so the
         // account page can render device/IP/last-seen for sessions minted before this change.
-        sqlx::query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await?;
         sqlx::query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT ''")
             .execute(&self.pool)
             .await?;
-        sqlx::query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen BIGINT NOT NULL DEFAULT 0")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen BIGINT NOT NULL DEFAULT 0",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mfa_totp (\
+                 user_sub TEXT PRIMARY KEY, \
+                 secret TEXT NOT NULL, \
+                 enabled BOOLEAN NOT NULL, \
+                 created_at BIGINT NOT NULL, \
+                 verified_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mfa_recovery_codes (\
+                 user_sub TEXT NOT NULL, \
+                 code_hash TEXT NOT NULL, \
+                 created_at BIGINT NOT NULL, \
+                 PRIMARY KEY (user_sub, code_hash)\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mfa_login_challenges (\
+                 id TEXT PRIMARY KEY, \
+                 user_sub TEXT NOT NULL, \
+                 return_to TEXT NOT NULL, \
+                 user_agent TEXT NOT NULL, \
+                 ip TEXT NOT NULL, \
+                 expires_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS login_events (\
+                 id TEXT PRIMARY KEY, \
+                 user_sub TEXT NOT NULL, \
+                 username TEXT NOT NULL, \
+                 occurred_at BIGINT NOT NULL, \
+                 ip TEXT NOT NULL, \
+                 user_agent TEXT NOT NULL, \
+                 method TEXT NOT NULL, \
+                 result TEXT NOT NULL, \
+                 detail TEXT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS personal_access_tokens (\
+                 id TEXT PRIMARY KEY, \
+                 user_sub TEXT NOT NULL, \
+                 name TEXT NOT NULL, \
+                 token_hash TEXT NOT NULL, \
+                 scopes TEXT NOT NULL, \
+                 created_at BIGINT NOT NULL, \
+                 expires_at BIGINT NOT NULL, \
+                 revoked_at BIGINT NOT NULL DEFAULT 0\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS webauthn_credentials (\
                  cred_id TEXT PRIMARY KEY, \
@@ -766,11 +1065,12 @@ impl PgStore {
     }
 
     async fn get_client_async(&self, client_id: &str) -> Result<Option<Client>, sqlx::Error> {
-        let row =
-            sqlx::query("SELECT name, client_secret_hash, first_party FROM oauth_clients WHERE client_id = $1")
-                .bind(client_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query(
+            "SELECT name, client_secret_hash, first_party FROM oauth_clients WHERE client_id = $1",
+        )
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(row) = row else { return Ok(None) };
         let name: String = row.try_get("name")?;
         let client_secret_hash: Option<String> = row.try_get("client_secret_hash")?;
@@ -827,12 +1127,11 @@ impl PgStore {
         user_sub: &str,
         client_id: &str,
     ) -> Result<Option<String>, sqlx::Error> {
-        let row =
-            sqlx::query("SELECT scope FROM consents WHERE user_sub = $1 AND client_id = $2")
-                .bind(user_sub)
-                .bind(client_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query("SELECT scope FROM consents WHERE user_sub = $1 AND client_id = $2")
+            .bind(user_sub)
+            .bind(client_id)
+            .fetch_optional(&self.pool)
+            .await?;
         match row {
             Some(r) => Ok(Some(r.try_get("scope")?)),
             None => Ok(None),
@@ -1027,10 +1326,7 @@ impl PgStore {
         Ok(())
     }
 
-    async fn put_verification_token_async(
-        &self,
-        t: &VerificationToken,
-    ) -> Result<(), sqlx::Error> {
+    async fn put_verification_token_async(&self, t: &VerificationToken) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO verification_tokens (token, sub, kind, expires_at) VALUES ($1, $2, $3, $4) \
              ON CONFLICT (token) DO UPDATE SET sub = EXCLUDED.sub, kind = EXCLUDED.kind, \
@@ -1052,12 +1348,11 @@ impl PgStore {
         token: &str,
     ) -> Result<Option<(String, String)>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            "SELECT sub, kind, expires_at FROM verification_tokens WHERE token = $1",
-        )
-        .bind(token)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let row =
+            sqlx::query("SELECT sub, kind, expires_at FROM verification_tokens WHERE token = $1")
+                .bind(token)
+                .fetch_optional(&mut *tx)
+                .await?;
         let Some(row) = row else {
             tx.rollback().await?;
             return Ok(None);
@@ -1281,6 +1576,292 @@ impl PgStore {
         Ok(())
     }
 
+    fn totp_from_row(row: &sqlx::postgres::PgRow) -> Result<TotpConfig, sqlx::Error> {
+        let created_at: i64 = row.try_get("created_at")?;
+        let verified_at: i64 = row.try_get("verified_at")?;
+        Ok(TotpConfig {
+            user_sub: row.try_get("user_sub")?,
+            secret: row.try_get("secret")?,
+            enabled: row.try_get("enabled")?,
+            created_at: created_at as u64,
+            verified_at: verified_at as u64,
+        })
+    }
+
+    async fn get_totp_async(&self, user_sub: &str) -> Result<Option<TotpConfig>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT user_sub, secret, enabled, created_at, verified_at \
+             FROM mfa_totp WHERE user_sub = $1",
+        )
+        .bind(user_sub)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(Self::totp_from_row).transpose()
+    }
+
+    async fn put_totp_async(&self, c: &TotpConfig) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO mfa_totp (user_sub, secret, enabled, created_at, verified_at) \
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (user_sub) DO UPDATE SET secret = EXCLUDED.secret, \
+             enabled = EXCLUDED.enabled, created_at = EXCLUDED.created_at, \
+             verified_at = EXCLUDED.verified_at",
+        )
+        .bind(&c.user_sub)
+        .bind(&c.secret)
+        .bind(c.enabled)
+        .bind(c.created_at as i64)
+        .bind(c.verified_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_totp_async(&self, user_sub: &str) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_sub = $1")
+            .bind(user_sub)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM mfa_totp WHERE user_sub = $1")
+            .bind(user_sub)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn put_recovery_codes_async(
+        &self,
+        user_sub: &str,
+        code_hashes: Vec<String>,
+        created_at: u64,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_sub = $1")
+            .bind(user_sub)
+            .execute(&mut *tx)
+            .await?;
+        for code_hash in code_hashes {
+            sqlx::query(
+                "INSERT INTO mfa_recovery_codes (user_sub, code_hash, created_at) \
+                 VALUES ($1, $2, $3)",
+            )
+            .bind(user_sub)
+            .bind(&code_hash)
+            .bind(created_at as i64)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn recovery_code_count_async(&self, user_sub: &str) -> Result<usize, sqlx::Error> {
+        let rows = sqlx::query("SELECT code_hash FROM mfa_recovery_codes WHERE user_sub = $1")
+            .bind(user_sub)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.len())
+    }
+
+    async fn take_recovery_code_async(
+        &self,
+        user_sub: &str,
+        code_hash: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let res =
+            sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_sub = $1 AND code_hash = $2")
+                .bind(user_sub)
+                .bind(code_hash)
+                .execute(&self.pool)
+                .await?;
+        Ok(res.rows_affected() == 1)
+    }
+
+    async fn put_totp_challenge_async(&self, c: &TotpChallenge) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO mfa_login_challenges (id, user_sub, return_to, user_agent, ip, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (id) DO UPDATE SET user_sub = EXCLUDED.user_sub, \
+             return_to = EXCLUDED.return_to, user_agent = EXCLUDED.user_agent, \
+             ip = EXCLUDED.ip, expires_at = EXCLUDED.expires_at",
+        )
+        .bind(&c.id)
+        .bind(&c.user_sub)
+        .bind(&c.return_to)
+        .bind(&c.user_agent)
+        .bind(&c.ip)
+        .bind(c.expires_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn take_totp_challenge_async(
+        &self,
+        id: &str,
+    ) -> Result<Option<TotpChallenge>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT id, user_sub, return_to, user_agent, ip, expires_at \
+             FROM mfa_login_challenges WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        let deleted = sqlx::query("DELETE FROM mfa_login_challenges WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        if deleted.rows_affected() != 1 {
+            return Ok(None);
+        }
+        let expires_at: i64 = row.try_get("expires_at")?;
+        if now_secs() > expires_at as u64 {
+            return Ok(None);
+        }
+        Ok(Some(TotpChallenge {
+            id: row.try_get("id")?,
+            user_sub: row.try_get("user_sub")?,
+            return_to: row.try_get("return_to")?,
+            user_agent: row.try_get("user_agent")?,
+            ip: row.try_get("ip")?,
+            expires_at: expires_at as u64,
+        }))
+    }
+
+    async fn put_login_event_async(&self, e: &LoginEvent) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO login_events \
+                 (id, user_sub, username, occurred_at, ip, user_agent, method, result, detail) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(&e.id)
+        .bind(&e.user_sub)
+        .bind(&e.username)
+        .bind(e.occurred_at as i64)
+        .bind(&e.ip)
+        .bind(&e.user_agent)
+        .bind(&e.method)
+        .bind(&e.result)
+        .bind(&e.detail)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    fn login_event_from_row(row: &sqlx::postgres::PgRow) -> Result<LoginEvent, sqlx::Error> {
+        let occurred_at: i64 = row.try_get("occurred_at")?;
+        Ok(LoginEvent {
+            id: row.try_get("id")?,
+            user_sub: row.try_get("user_sub")?,
+            username: row.try_get("username")?,
+            occurred_at: occurred_at as u64,
+            ip: row.try_get("ip")?,
+            user_agent: row.try_get("user_agent")?,
+            method: row.try_get("method")?,
+            result: row.try_get("result")?,
+            detail: row.try_get("detail")?,
+        })
+    }
+
+    async fn list_login_events_async(
+        &self,
+        user_sub: &str,
+        limit: usize,
+    ) -> Result<Vec<LoginEvent>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, user_sub, username, occurred_at, ip, user_agent, method, result, detail \
+             FROM login_events WHERE user_sub = $1 ORDER BY occurred_at DESC",
+        )
+        .bind(user_sub)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .take(limit)
+            .map(Self::login_event_from_row)
+            .collect()
+    }
+
+    async fn put_personal_token_async(&self, t: &PersonalAccessToken) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO personal_access_tokens \
+                 (id, user_sub, name, token_hash, scopes, created_at, expires_at, revoked_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, \
+             token_hash = EXCLUDED.token_hash, scopes = EXCLUDED.scopes, \
+             expires_at = EXCLUDED.expires_at, revoked_at = EXCLUDED.revoked_at",
+        )
+        .bind(&t.id)
+        .bind(&t.user_sub)
+        .bind(&t.name)
+        .bind(&t.token_hash)
+        .bind(&t.scopes)
+        .bind(t.created_at as i64)
+        .bind(t.expires_at as i64)
+        .bind(t.revoked_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    fn personal_token_from_row(
+        row: &sqlx::postgres::PgRow,
+    ) -> Result<PersonalAccessToken, sqlx::Error> {
+        let created_at: i64 = row.try_get("created_at")?;
+        let expires_at: i64 = row.try_get("expires_at")?;
+        let revoked_at: i64 = row.try_get("revoked_at")?;
+        Ok(PersonalAccessToken {
+            id: row.try_get("id")?,
+            user_sub: row.try_get("user_sub")?,
+            name: row.try_get("name")?,
+            token_hash: row.try_get("token_hash")?,
+            scopes: row.try_get("scopes")?,
+            created_at: created_at as u64,
+            expires_at: expires_at as u64,
+            revoked_at: revoked_at as u64,
+        })
+    }
+
+    async fn list_personal_tokens_async(
+        &self,
+        user_sub: &str,
+    ) -> Result<Vec<PersonalAccessToken>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, user_sub, name, token_hash, scopes, created_at, expires_at, revoked_at \
+             FROM personal_access_tokens WHERE user_sub = $1 AND revoked_at = 0 \
+             ORDER BY created_at DESC",
+        )
+        .bind(user_sub)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(Self::personal_token_from_row).collect()
+    }
+
+    async fn revoke_personal_token_async(
+        &self,
+        user_sub: &str,
+        id: &str,
+        revoked_at: u64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE personal_access_tokens SET revoked_at = $3 \
+             WHERE id = $1 AND user_sub = $2",
+        )
+        .bind(id)
+        .bind(user_sub)
+        .bind(revoked_at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn put_state_async(&self, s: &WebauthnState) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO webauthn_states (id, kind, state, expires_at) VALUES ($1, $2, $3, $4) \
@@ -1329,12 +1910,10 @@ impl PgStore {
 #[async_trait]
 impl Store for PgStore {
     async fn get_client(&self, client_id: &str) -> Option<Client> {
-        self.get_client_async(client_id)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "pg get_client failed");
-                None
-            })
+        self.get_client_async(client_id).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg get_client failed");
+            None
+        })
     }
 
     async fn put_client(&self, client: Client) {
@@ -1474,10 +2053,12 @@ impl Store for PgStore {
     }
 
     async fn list_sessions(&self, user_sub: &str) -> Vec<Session> {
-        self.list_sessions_async(user_sub).await.unwrap_or_else(|e| {
-            tracing::error!(error = %e, "pg list_sessions failed");
-            Vec::new()
-        })
+        self.list_sessions_async(user_sub)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg list_sessions failed");
+                Vec::new()
+            })
     }
 
     async fn revoke_session(&self, user_sub: &str, id: &str) {
@@ -1525,6 +2106,106 @@ impl Store for PgStore {
     async fn update_credential_passkey(&self, cred_id: &str, passkey: &str) {
         if let Err(e) = self.update_credential_passkey_async(cred_id, passkey).await {
             tracing::error!(error = %e, "pg update_credential_passkey failed");
+        }
+    }
+
+    async fn get_totp(&self, user_sub: &str) -> Option<TotpConfig> {
+        self.get_totp_async(user_sub).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "pg get_totp failed");
+            None
+        })
+    }
+
+    async fn put_totp(&self, config: TotpConfig) {
+        if let Err(e) = self.put_totp_async(&config).await {
+            tracing::error!(error = %e, "pg put_totp failed");
+        }
+    }
+
+    async fn delete_totp(&self, user_sub: &str) {
+        if let Err(e) = self.delete_totp_async(user_sub).await {
+            tracing::error!(error = %e, "pg delete_totp failed");
+        }
+    }
+
+    async fn put_recovery_codes(&self, user_sub: &str, code_hashes: Vec<String>, created_at: u64) {
+        if let Err(e) = self
+            .put_recovery_codes_async(user_sub, code_hashes, created_at)
+            .await
+        {
+            tracing::error!(error = %e, "pg put_recovery_codes failed");
+        }
+    }
+
+    async fn recovery_code_count(&self, user_sub: &str) -> usize {
+        self.recovery_code_count_async(user_sub)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg recovery_code_count failed");
+                0
+            })
+    }
+
+    async fn take_recovery_code(&self, user_sub: &str, code_hash: &str) -> bool {
+        self.take_recovery_code_async(user_sub, code_hash)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg take_recovery_code failed");
+                false
+            })
+    }
+
+    async fn put_totp_challenge(&self, challenge: TotpChallenge) {
+        if let Err(e) = self.put_totp_challenge_async(&challenge).await {
+            tracing::error!(error = %e, "pg put_totp_challenge failed");
+        }
+    }
+
+    async fn take_totp_challenge(&self, id: &str) -> Option<TotpChallenge> {
+        self.take_totp_challenge_async(id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg take_totp_challenge failed");
+                None
+            })
+    }
+
+    async fn put_login_event(&self, event: LoginEvent) {
+        if let Err(e) = self.put_login_event_async(&event).await {
+            tracing::error!(error = %e, "pg put_login_event failed");
+        }
+    }
+
+    async fn list_login_events(&self, user_sub: &str, limit: usize) -> Vec<LoginEvent> {
+        self.list_login_events_async(user_sub, limit)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg list_login_events failed");
+                Vec::new()
+            })
+    }
+
+    async fn put_personal_token(&self, token: PersonalAccessToken) {
+        if let Err(e) = self.put_personal_token_async(&token).await {
+            tracing::error!(error = %e, "pg put_personal_token failed");
+        }
+    }
+
+    async fn list_personal_tokens(&self, user_sub: &str) -> Vec<PersonalAccessToken> {
+        self.list_personal_tokens_async(user_sub)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "pg list_personal_tokens failed");
+                Vec::new()
+            })
+    }
+
+    async fn revoke_personal_token(&self, user_sub: &str, id: &str, revoked_at: u64) {
+        if let Err(e) = self
+            .revoke_personal_token_async(user_sub, id, revoked_at)
+            .await
+        {
+            tracing::error!(error = %e, "pg revoke_personal_token failed");
         }
     }
 

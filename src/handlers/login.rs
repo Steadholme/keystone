@@ -8,15 +8,25 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::audit::AuditEvent;
 use crate::auth;
-use crate::handlers::register::client_ip;
-use crate::store::Session;
-use crate::AppState;
+use crate::handlers::register::{client_ip, notice};
+use crate::store::{
+    new_opaque_code, LoginEvent, PersonalAccessToken, Session, TotpChallenge, TotpConfig, User,
+};
+use crate::{now_secs, totp, AppState};
 
 const LOGIN_HTML: &str = include_str!("../../templates/login.html");
 const ACCOUNT_HTML: &str = include_str!("../../templates/account.html");
+const TOTP_LOGIN_HTML: &str = include_str!("../../templates/totp_login.html");
+const TOTP_ENROLL_HTML: &str = include_str!("../../templates/totp_enroll.html");
+const RECOVERY_CODES_HTML: &str = include_str!("../../templates/recovery_codes.html");
+const TOKEN_CREATED_HTML: &str = include_str!("../../templates/token_created.html");
+
+const TOTP_CHALLENGE_TTL: u64 = 5 * 60;
+const RECOVERY_CODE_COUNT: usize = 10;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginQuery {
@@ -48,6 +58,54 @@ pub struct RevokeForm {
     pub csrf_token: String,
     #[serde(default)]
     pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TotpLoginForm {
+    #[serde(default)]
+    pub csrf_token: String,
+    #[serde(default)]
+    pub challenge_id: String,
+    #[serde(default)]
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TotpEnrollForm {
+    #[serde(default)]
+    pub csrf_token: String,
+    #[serde(default)]
+    pub current_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TotpVerifyForm {
+    #[serde(default)]
+    pub csrf_token: String,
+    #[serde(default)]
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatCreateForm {
+    #[serde(default)]
+    pub csrf_token: String,
+    #[serde(default)]
+    pub current_password: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub scopes: String,
+    #[serde(default)]
+    pub expiry_days: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatRevokeForm {
+    #[serde(default)]
+    pub csrf_token: String,
+    #[serde(default)]
+    pub token_id: String,
 }
 
 /// `GET /` — bare root: 302 to `/account`. `/account` itself bounces to `/login`
@@ -92,7 +150,17 @@ pub async fn login_submit(
 
     // GATE: a disabled account is rejected up front — BEFORE any password verification —
     // with an explicit 403, so neither the outcome nor its timing depends on the password.
-    if user.as_ref().is_some_and(|u| u.disabled) {
+    if let Some(disabled_user) = user.as_ref().filter(|u| u.disabled) {
+        record_login_event(
+            &state,
+            &disabled_user.sub,
+            &form.username,
+            "password",
+            "failure",
+            "account disabled",
+            &headers,
+        )
+        .await;
         state.audit.emit(AuditEvent::warning(
             "login.disabled",
             &form.username,
@@ -116,6 +184,18 @@ pub async fn login_submit(
         .unwrap_or(false);
 
     if !verified {
+        if let Some(u) = user.as_ref() {
+            record_login_event(
+                &state,
+                &u.sub,
+                &form.username,
+                "password",
+                "failure",
+                "invalid credentials",
+                &headers,
+            )
+            .await;
+        }
         // Audit the denial: submitted username + a fixed reason only — NEVER the password.
         state.audit.emit(AuditEvent::warning(
             "login.failure",
@@ -136,6 +216,16 @@ pub async fn login_submit(
     // (and therefore cannot reach any session-gated page, including /authorize). Seeded and
     // pre-provisioned accounts are backfilled to verified, so this never locks them out.
     if !user.email_verified {
+        record_login_event(
+            &state,
+            &user.sub,
+            &form.username,
+            "password",
+            "failure",
+            "email not verified",
+            &headers,
+        )
+        .await;
         state.audit.emit(AuditEvent::warning(
             "login.unverified",
             &user.email,
@@ -149,8 +239,58 @@ pub async fn login_submit(
         );
     }
 
-    let cookie =
-        auth::create_session(&state, &user.sub, &user_agent(&headers), &client_ip(&headers)).await;
+    let ua = user_agent(&headers);
+    let ip = client_ip(&headers);
+    if state
+        .store
+        .get_totp(&user.sub)
+        .await
+        .is_some_and(|m| m.enabled)
+    {
+        let challenge_id = new_opaque_code();
+        state
+            .store
+            .put_totp_challenge(TotpChallenge {
+                id: challenge_id.clone(),
+                user_sub: user.sub.clone(),
+                return_to: return_to.clone(),
+                user_agent: ua,
+                ip,
+                expires_at: now_secs() + TOTP_CHALLENGE_TTL,
+            })
+            .await;
+        record_login_event(
+            &state,
+            &user.sub,
+            &form.username,
+            "password",
+            "challenge",
+            "totp required",
+            &headers,
+        )
+        .await;
+        state.audit.emit(AuditEvent::info(
+            "login.totp_required",
+            &user.email,
+            "totp",
+            "password accepted; second factor required",
+        ));
+        let csrf = auth::new_csrf_token();
+        let body = render_totp_login(&csrf, &challenge_id, &return_to, None);
+        return html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)]);
+    }
+
+    let cookie = auth::create_session(&state, &user.sub, &ua, &ip).await;
+    record_login_event(
+        &state,
+        &user.sub,
+        &form.username,
+        "password",
+        "success",
+        "password login",
+        &headers,
+    )
+    .await;
     state.audit.emit(AuditEvent::info(
         "login.success",
         &user.email,
@@ -168,17 +308,33 @@ pub async fn login_submit(
 
 /// `GET /account` — session-required; shows the user + passkey/session controls.
 pub async fn account_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(session) = auth::current_session(&state, &headers).await else {
-        return redirect("/login", &[]);
-    };
-    let Some(user) = state.store.get_user(&session.user_sub).await else {
-        auth::destroy_session(&state, &headers).await;
-        return redirect("/login", &[auth::clear_cookie(auth::SESSION_COOKIE)]);
+    let (session, user) = match require_session_user(&state, &headers).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
     };
     let count = state.store.list_credentials(&user.sub).await.len();
     let sessions = state.store.list_sessions(&user.sub).await;
+    let totp = state.store.get_totp(&user.sub).await;
+    let recovery_count = if totp.as_ref().is_some_and(|m| m.enabled) {
+        state.store.recovery_code_count(&user.sub).await
+    } else {
+        0
+    };
+    let login_events = state.store.list_login_events(&user.sub, 10).await;
+    let tokens = state.store.list_personal_tokens(&user.sub).await;
     let csrf = auth::new_csrf_token();
-    let body = render_account(&csrf, &user.sub, &user.email, count, &sessions, &session.id);
+    let body = render_account(
+        &csrf,
+        &user.sub,
+        &user.email,
+        count,
+        &sessions,
+        &session.id,
+        totp.as_ref(),
+        recovery_count,
+        &login_events,
+        &tokens,
+    );
     html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)])
 }
 
@@ -197,7 +353,10 @@ pub async fn revoke_session(
         return redirect("/account", &[]);
     }
     if !form.session_id.is_empty() && form.session_id != session.id {
-        state.store.revoke_session(&session.user_sub, &form.session_id).await;
+        state
+            .store
+            .revoke_session(&session.user_sub, &form.session_id)
+            .await;
         let actor = actor_email(&state, &session.user_sub).await;
         state.audit.emit(AuditEvent::info(
             "session.revoke",
@@ -222,7 +381,10 @@ pub async fn revoke_other_sessions(
     if !auth::verify_csrf(&headers, &form.csrf_token) {
         return redirect("/account", &[]);
     }
-    state.store.revoke_other_sessions(&session.user_sub, &session.id).await;
+    state
+        .store
+        .revoke_other_sessions(&session.user_sub, &session.id)
+        .await;
     let actor = actor_email(&state, &session.user_sub).await;
     state.audit.emit(AuditEvent::info(
         "session.revoke_all",
@@ -230,6 +392,339 @@ pub async fn revoke_other_sessions(
         "session",
         "logged out all other devices",
     ));
+    redirect("/account", &[])
+}
+
+/// `POST /login/totp` — complete a password-accepted TOTP challenge and mint the session.
+pub async fn totp_login_submit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<TotpLoginForm>,
+) -> Response {
+    if !auth::verify_csrf(&headers, &form.csrf_token) {
+        return reject_login(
+            "/account",
+            "",
+            "Invalid or expired form token — please try again.",
+        );
+    }
+    let Some(challenge) = state.store.take_totp_challenge(&form.challenge_id).await else {
+        return reject_login(
+            "/account",
+            "",
+            "The verification challenge expired. Sign in again.",
+        );
+    };
+    let Some(user) = state.store.get_user(&challenge.user_sub).await else {
+        return reject_login(
+            "/account",
+            "",
+            "The verification challenge expired. Sign in again.",
+        );
+    };
+    let Some(mfa) = state.store.get_totp(&user.sub).await.filter(|m| m.enabled) else {
+        return reject_login("/account", "", "Two-step verification is not enabled.");
+    };
+
+    let (ok, method, detail) = if totp::verify_code(&mfa.secret, &form.code, now_secs()) {
+        (true, "totp", "totp login")
+    } else if state
+        .store
+        .take_recovery_code(
+            &user.sub,
+            &secret_hash(&normalize_recovery_code(&form.code)),
+        )
+        .await
+    {
+        (true, "recovery", "recovery code login")
+    } else {
+        (false, "totp", "invalid second factor")
+    };
+
+    if !ok {
+        record_login_event(
+            &state,
+            &user.sub,
+            &user.email,
+            method,
+            "failure",
+            detail,
+            &headers,
+        )
+        .await;
+        state.audit.emit(AuditEvent::warning(
+            "login.totp_failure",
+            &user.email,
+            "totp",
+            "invalid second factor",
+        ));
+        return reject_login(
+            &challenge.return_to,
+            &user.email,
+            "Incorrect verification code. Please sign in again.",
+        );
+    }
+
+    let cookie =
+        auth::create_session(&state, &user.sub, &challenge.user_agent, &challenge.ip).await;
+    record_login_event(
+        &state,
+        &user.sub,
+        &user.email,
+        method,
+        "success",
+        detail,
+        &headers,
+    )
+    .await;
+    state.audit.emit(AuditEvent::info(
+        "login.success",
+        &user.email,
+        method,
+        detail,
+    ));
+    redirect(
+        &challenge.return_to,
+        &[
+            auth::session_cookie(&cookie, state.config.session_ttl),
+            auth::clear_cookie(auth::CSRF_COOKIE),
+        ],
+    )
+}
+
+/// `POST /account/mfa/totp/enroll` — verify current password and show QR/manual secret.
+pub async fn totp_enroll(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<TotpEnrollForm>,
+) -> Response {
+    let (_session, user) = match require_session_user(&state, &headers).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !auth::verify_csrf(&headers, &form.csrf_token) {
+        return redirect("/account", &[]);
+    }
+    if !verify_current_password(&user, &form.current_password) {
+        return notice(
+            StatusCode::BAD_REQUEST,
+            "Two-step setup rejected",
+            "Your current password is incorrect.",
+            "/account",
+            "Back to account",
+        );
+    }
+
+    let secret = totp::new_secret();
+    state
+        .store
+        .put_totp(TotpConfig {
+            user_sub: user.sub.clone(),
+            secret: secret.clone(),
+            enabled: false,
+            created_at: now_secs(),
+            verified_at: 0,
+        })
+        .await;
+    state.audit.emit(AuditEvent::info(
+        "mfa.totp.enroll_start",
+        &user.email,
+        "totp",
+        "totp enrollment started",
+    ));
+    let csrf = auth::new_csrf_token();
+    let body = render_totp_enroll(&csrf, &user.email, &secret, None);
+    html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)])
+}
+
+/// `POST /account/mfa/totp/verify` — verify the first code and show recovery codes once.
+pub async fn totp_verify(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<TotpVerifyForm>,
+) -> Response {
+    let (_session, user) = match require_session_user(&state, &headers).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !auth::verify_csrf(&headers, &form.csrf_token) {
+        return redirect("/account", &[]);
+    }
+    let Some(mut cfg) = state.store.get_totp(&user.sub).await else {
+        return redirect("/account", &[]);
+    };
+    if !totp::verify_code(&cfg.secret, &form.code, now_secs()) {
+        let csrf = auth::new_csrf_token();
+        let body = render_totp_enroll(
+            &csrf,
+            &user.email,
+            &cfg.secret,
+            Some("The verification code did not match. Try the current code from your app."),
+        );
+        return html_with_cookies(StatusCode::BAD_REQUEST, body, &[auth::csrf_cookie(&csrf)]);
+    }
+
+    cfg.enabled = true;
+    cfg.verified_at = now_secs();
+    state.store.put_totp(cfg).await;
+    let codes: Vec<String> = (0..RECOVERY_CODE_COUNT)
+        .map(|_| totp::new_recovery_code())
+        .collect();
+    let hashes: Vec<String> = codes
+        .iter()
+        .map(|c| secret_hash(&normalize_recovery_code(c)))
+        .collect();
+    state
+        .store
+        .put_recovery_codes(&user.sub, hashes, now_secs())
+        .await;
+    state.audit.emit(AuditEvent::info(
+        "mfa.totp.enabled",
+        &user.email,
+        "totp",
+        "totp enabled",
+    ));
+    let body = render_recovery_codes(&user.email, &codes);
+    html_with_cookies(
+        StatusCode::OK,
+        body,
+        &[auth::clear_cookie(auth::CSRF_COOKIE)],
+    )
+}
+
+/// `POST /account/mfa/totp/disable` — verify current password and remove TOTP.
+pub async fn totp_disable(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<TotpEnrollForm>,
+) -> Response {
+    let (_session, user) = match require_session_user(&state, &headers).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !auth::verify_csrf(&headers, &form.csrf_token) {
+        return redirect("/account", &[]);
+    }
+    if !verify_current_password(&user, &form.current_password) {
+        return notice(
+            StatusCode::BAD_REQUEST,
+            "Two-step disable rejected",
+            "Your current password is incorrect.",
+            "/account",
+            "Back to account",
+        );
+    }
+    state.store.delete_totp(&user.sub).await;
+    state.audit.emit(AuditEvent::info(
+        "mfa.totp.disabled",
+        &user.email,
+        "totp",
+        "totp disabled",
+    ));
+    redirect("/account", &[])
+}
+
+/// `POST /account/tokens/create` — create a hashed PAT and show plaintext once.
+pub async fn pat_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<PatCreateForm>,
+) -> Response {
+    let (_session, user) = match require_session_user(&state, &headers).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !auth::verify_csrf(&headers, &form.csrf_token) {
+        return redirect("/account", &[]);
+    }
+    if !verify_current_password(&user, &form.current_password) {
+        return notice(
+            StatusCode::BAD_REQUEST,
+            "Token rejected",
+            "Your current password is incorrect.",
+            "/account",
+            "Back to account",
+        );
+    }
+    let Some(name) = clean_token_name(&form.name) else {
+        return notice(
+            StatusCode::BAD_REQUEST,
+            "Token rejected",
+            "Enter a token name between 1 and 80 characters.",
+            "/account",
+            "Back to account",
+        );
+    };
+    let Some(scopes) = clean_scopes(&form.scopes) else {
+        return notice(
+            StatusCode::BAD_REQUEST,
+            "Token rejected",
+            "Scopes may contain letters, numbers, colon, dot, underscore, and dash.",
+            "/account",
+            "Back to account",
+        );
+    };
+    let Some(days) = parse_expiry_days(&form.expiry_days) else {
+        return notice(
+            StatusCode::BAD_REQUEST,
+            "Token rejected",
+            "Expiry must be between 1 and 365 days.",
+            "/account",
+            "Back to account",
+        );
+    };
+
+    let plaintext = format!("pat_{}", new_opaque_code());
+    let token = PersonalAccessToken {
+        id: format!("pat_{}", new_opaque_code()),
+        user_sub: user.sub.clone(),
+        name: name.clone(),
+        token_hash: secret_hash(&plaintext),
+        scopes: scopes.clone(),
+        created_at: now_secs(),
+        expires_at: now_secs() + days * 86400,
+        revoked_at: 0,
+    };
+    state.store.put_personal_token(token).await;
+    state.audit.emit(AuditEvent::info(
+        "pat.create",
+        &user.email,
+        &name,
+        "personal access token created",
+    ));
+    let body = render_token_created(&user.email, &name, &scopes, days, &plaintext);
+    html_with_cookies(
+        StatusCode::OK,
+        body,
+        &[auth::clear_cookie(auth::CSRF_COOKIE)],
+    )
+}
+
+/// `POST /account/tokens/revoke` — revoke one PAT owned by the current user.
+pub async fn pat_revoke(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<PatRevokeForm>,
+) -> Response {
+    let (_session, user) = match require_session_user(&state, &headers).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !auth::verify_csrf(&headers, &form.csrf_token) {
+        return redirect("/account", &[]);
+    }
+    if !form.token_id.is_empty() {
+        state
+            .store
+            .revoke_personal_token(&user.sub, &form.token_id, now_secs())
+            .await;
+        state.audit.emit(AuditEvent::info(
+            "pat.revoke",
+            &user.email,
+            "personal-access-token",
+            "personal access token revoked",
+        ));
+    }
     redirect("/account", &[])
 }
 
@@ -250,9 +745,12 @@ pub async fn logout(
             .await
             .map(|u| u.email)
             .unwrap_or(session.user_sub);
-        state
-            .audit
-            .emit(AuditEvent::info("session.logout", &actor, "session", "logged out"));
+        state.audit.emit(AuditEvent::info(
+            "session.logout",
+            &actor,
+            "session",
+            "logged out",
+        ));
     }
     auth::destroy_session(&state, &headers).await;
     redirect(
@@ -294,6 +792,10 @@ fn render_account(
     passkeys: usize,
     sessions: &[Session],
     current_id: &str,
+    totp: Option<&TotpConfig>,
+    recovery_count: usize,
+    login_events: &[LoginEvent],
+    tokens: &[PersonalAccessToken],
 ) -> String {
     // Display name: the email local-part (the closest thing to a human name we hold).
     let name = email
@@ -310,8 +812,210 @@ fn render_account(
         .replace("{{PASSKEYS}}", &passkeys.to_string())
         .replace("{{SESSION_COUNT}}", &sessions.len().to_string())
         .replace("{{OTHER_SESSIONS}}", &others.to_string())
+        .replace("{{TOTP_STATUS}}", &render_totp_status(totp, recovery_count))
+        .replace("{{TOTP_CONTROLS}}", &render_totp_controls(csrf, totp))
+        .replace("{{LOGIN_EVENTS}}", &render_login_events(login_events))
+        .replace("{{TOKENS}}", &render_tokens(csrf, tokens))
         .replace("{{REVOKE_ALL}}", &render_revoke_all(csrf, others))
         .replace("{{SESSIONS}}", &render_sessions(csrf, sessions, current_id))
+}
+
+fn render_totp_login(
+    csrf: &str,
+    challenge_id: &str,
+    return_to: &str,
+    error: Option<&str>,
+) -> String {
+    TOTP_LOGIN_HTML
+        .replace("{{ERROR}}", &error_html(error))
+        .replace("{{CSRF}}", &esc(csrf))
+        .replace("{{CHALLENGE_ID}}", &esc(challenge_id))
+        .replace("{{RETURN_TO}}", &esc(return_to))
+}
+
+fn render_totp_enroll(csrf: &str, email: &str, secret: &str, error: Option<&str>) -> String {
+    let uri = totp::otpauth_uri("HOLDFAST", email, secret);
+    let qr = totp::qr_svg(&uri).unwrap_or_else(|| {
+        format!(
+            r#"<div class="qr-fallback"><code>{}</code></div>"#,
+            esc(&uri)
+        )
+    });
+    TOTP_ENROLL_HTML
+        .replace("{{ERROR}}", &error_html(error))
+        .replace("{{CSRF}}", &esc(csrf))
+        .replace("{{EMAIL}}", &esc(email))
+        .replace("{{SECRET}}", &esc(secret))
+        .replace("{{OTPAUTH}}", &esc(&uri))
+        .replace("{{QR}}", &qr)
+}
+
+fn render_recovery_codes(email: &str, codes: &[String]) -> String {
+    let rows = codes
+        .iter()
+        .map(|c| format!(r#"<code>{}</code>"#, esc(c)))
+        .collect::<Vec<_>>()
+        .join("");
+    RECOVERY_CODES_HTML
+        .replace("{{EMAIL}}", &esc(email))
+        .replace("{{CODES}}", &rows)
+}
+
+fn render_token_created(
+    email: &str,
+    name: &str,
+    scopes: &str,
+    days: u64,
+    plaintext: &str,
+) -> String {
+    TOKEN_CREATED_HTML
+        .replace("{{EMAIL}}", &esc(email))
+        .replace("{{NAME}}", &esc(name))
+        .replace("{{SCOPES}}", &esc(scopes))
+        .replace("{{DAYS}}", &days.to_string())
+        .replace("{{TOKEN}}", &esc(plaintext))
+}
+
+fn error_html(error: Option<&str>) -> String {
+    match error {
+        Some(e) => format!(r#"<div class="alert">{}</div>"#, esc(e)),
+        None => String::new(),
+    }
+}
+
+fn render_totp_status(totp: Option<&TotpConfig>, recovery_count: usize) -> String {
+    match totp {
+        Some(m) if m.enabled => format!(
+            r#"<span class="badge">Authenticator app</span>
+               <span class="muted">{} recovery code(s) unused.</span>"#,
+            recovery_count
+        ),
+        Some(_) => r#"<span class="pill">Setup pending</span>"#.to_string(),
+        None => r#"<span class="pill">Not enabled</span>"#.to_string(),
+    }
+}
+
+fn render_totp_controls(csrf: &str, totp: Option<&TotpConfig>) -> String {
+    match totp {
+        Some(m) if m.enabled => format!(
+            r#"<form class="inline-secure-form" method="post" action="/account/mfa/totp/disable">
+                 <input type="hidden" name="csrf_token" value="{csrf}">
+                 <input name="current_password" type="password" autocomplete="current-password"
+                        placeholder="Current password" required>
+                 <button class="btn btn-ghost btn-sm" type="submit">Disable TOTP</button>
+               </form>"#,
+            csrf = esc(csrf),
+        ),
+        Some(_) => format!(
+            r#"<form class="inline-secure-form" method="post" action="/account/mfa/totp/verify">
+                 <input type="hidden" name="csrf_token" value="{csrf}">
+                 <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                        placeholder="123456" required>
+                 <button class="btn btn-secondary btn-sm" type="submit">Verify setup</button>
+               </form>"#,
+            csrf = esc(csrf),
+        ),
+        None => format!(
+            r#"<form class="inline-secure-form" method="post" action="/account/mfa/totp/enroll">
+                 <input type="hidden" name="csrf_token" value="{csrf}">
+                 <input name="current_password" type="password" autocomplete="current-password"
+                        placeholder="Current password" required>
+                 <button class="btn btn-secondary btn-sm" type="submit">Enable TOTP</button>
+               </form>"#,
+            csrf = esc(csrf),
+        ),
+    }
+}
+
+fn render_login_events(events: &[LoginEvent]) -> String {
+    if events.is_empty() {
+        return r#"<p class="muted">No login history yet.</p>"#.to_string();
+    }
+    let now = now_secs();
+    let mut out = String::new();
+    for (idx, e) in events.iter().enumerate() {
+        let device = if e.user_agent.is_empty() {
+            "Unknown device".to_string()
+        } else {
+            device_label(&e.user_agent)
+        };
+        let ip = if e.ip.is_empty() { "unknown" } else { &e.ip };
+        let flag = login_event_flag(events, idx);
+        out.push_str(&format!(
+            r#"<div class="history-row">
+                 <div>
+                   <div class="history-row__main">{method} · {result} {flag}</div>
+                   <div class="muted history-row__sub">{ip} · {device} · {when} · {detail}</div>
+                 </div>
+               </div>"#,
+            method = esc(&e.method),
+            result = esc(&e.result),
+            flag = flag,
+            ip = esc(ip),
+            device = esc(&device),
+            when = esc(&ago(now, e.occurred_at)),
+            detail = esc(&e.detail),
+        ));
+    }
+    out
+}
+
+fn login_event_flag(events: &[LoginEvent], idx: usize) -> String {
+    let e = &events[idx];
+    if e.result == "failure" {
+        return r#"<span class="pill pill--warn">Failed</span>"#.to_string();
+    }
+    if e.result == "challenge" {
+        return r#"<span class="pill">MFA required</span>"#.to_string();
+    }
+    if e.result == "success" && !e.ip.is_empty() && e.ip != "unknown" {
+        let older_success_same_ip = events[idx + 1..]
+            .iter()
+            .any(|old| old.result == "success" && old.ip == e.ip);
+        let older_success_other_ip = events[idx + 1..]
+            .iter()
+            .any(|old| old.result == "success" && old.ip != e.ip);
+        if !older_success_same_ip && older_success_other_ip {
+            return r#"<span class="pill pill--warn">New IP</span>"#.to_string();
+        }
+    }
+    String::new()
+}
+
+fn render_tokens(csrf: &str, tokens: &[PersonalAccessToken]) -> String {
+    if tokens.is_empty() {
+        return r#"<p class="muted">No personal access tokens.</p>"#.to_string();
+    }
+    let now = now_secs();
+    let mut out = String::new();
+    for t in tokens {
+        let badge = if now > t.expires_at {
+            r#"<span class="pill pill--warn">Expired</span>"#
+        } else {
+            r#"<span class="pill pill--ok">Active</span>"#
+        };
+        out.push_str(&format!(
+            r#"<div class="token-row">
+                 <div>
+                   <div class="token-row__main">{name} {badge}</div>
+                   <div class="muted token-row__sub">{scopes} · created {created} · expires in {expires}</div>
+                 </div>
+                 <form method="post" action="/account/tokens/revoke" class="token-row__action">
+                   <input type="hidden" name="csrf_token" value="{csrf}">
+                   <input type="hidden" name="token_id" value="{id}">
+                   <button class="btn btn-ghost btn-sm" type="submit">Revoke</button>
+                 </form>
+               </div>"#,
+            name = esc(&t.name),
+            badge = badge,
+            scopes = esc(&t.scopes),
+            created = esc(&ago(now, t.created_at)),
+            expires = esc(&ago(t.expires_at, now)),
+            csrf = esc(csrf),
+            id = esc(&t.id),
+        ));
+    }
+    out
 }
 
 /// Render the session list as HTML rows. The current session is badged and cannot be
@@ -330,7 +1034,11 @@ fn render_sessions(csrf: &str, sessions: &[Session], current_id: &str) -> String
         } else {
             device_label(&s.user_agent)
         };
-        let ip = if s.ip.is_empty() { "unknown".to_string() } else { s.ip.clone() };
+        let ip = if s.ip.is_empty() {
+            "unknown".to_string()
+        } else {
+            s.ip.clone()
+        };
         let last = if s.last_seen == 0 {
             "—".to_string()
         } else {
@@ -439,6 +1147,100 @@ async fn actor_email(state: &AppState, sub: &str) -> String {
         .await
         .map(|u| u.email)
         .unwrap_or_else(|| sub.to_string())
+}
+
+async fn require_session_user(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(Session, User), Response> {
+    let Some(session) = auth::current_session(state, headers).await else {
+        return Err(redirect("/login", &[]));
+    };
+    let Some(user) = state.store.get_user(&session.user_sub).await else {
+        auth::destroy_session(state, headers).await;
+        return Err(redirect(
+            "/login",
+            &[auth::clear_cookie(auth::SESSION_COOKIE)],
+        ));
+    };
+    Ok((session, user))
+}
+
+fn verify_current_password(user: &User, password: &str) -> bool {
+    user.password_hash
+        .as_deref()
+        .map(|h| auth::verify_password(password, h))
+        .unwrap_or(false)
+}
+
+pub(crate) async fn record_login_event(
+    state: &AppState,
+    user_sub: &str,
+    username: &str,
+    method: &str,
+    result: &str,
+    detail: &str,
+    headers: &HeaderMap,
+) {
+    state
+        .store
+        .put_login_event(LoginEvent {
+            id: new_opaque_code(),
+            user_sub: user_sub.to_string(),
+            username: username.to_string(),
+            occurred_at: now_secs(),
+            ip: client_ip(headers),
+            user_agent: user_agent(headers),
+            method: method.to_string(),
+            result: result.to_string(),
+            detail: detail.to_string(),
+        })
+        .await;
+}
+
+fn secret_hash(value: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(value.as_bytes());
+    let digest = h.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+fn normalize_recovery_code(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
+fn clean_token_name(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    (!name.is_empty() && name.len() <= 80).then_some(name.to_string())
+}
+
+fn clean_scopes(raw: &str) -> Option<String> {
+    let scopes: Vec<String> = raw
+        .split_whitespace()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if scopes.is_empty() || scopes.len() > 10 {
+        return None;
+    }
+    let valid = scopes.iter().all(|s| {
+        s.len() <= 64
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-'))
+    });
+    valid.then(|| scopes.join(" "))
+}
+
+fn parse_expiry_days(raw: &str) -> Option<u64> {
+    let days = raw.trim().parse::<u64>().ok()?;
+    (1..=365).contains(&days).then_some(days)
 }
 
 /// Extract the `User-Agent` header as an owned string (empty when absent/non-ASCII).

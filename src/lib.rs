@@ -16,6 +16,7 @@ pub mod pkce;
 pub mod ratelimit;
 pub mod store;
 pub mod tls;
+pub mod totp;
 pub mod webauthn;
 
 use std::sync::Arc;
@@ -73,7 +74,22 @@ pub fn app(state: AppState) -> Router {
             "/login",
             get(handlers::login::login_page).post(handlers::login::login_submit),
         )
+        .route("/login/totp", post(handlers::login::totp_login_submit))
         .route("/account", get(handlers::login::account_page))
+        .route(
+            "/account/mfa/totp/enroll",
+            post(handlers::login::totp_enroll),
+        )
+        .route(
+            "/account/mfa/totp/verify",
+            post(handlers::login::totp_verify),
+        )
+        .route(
+            "/account/mfa/totp/disable",
+            post(handlers::login::totp_disable),
+        )
+        .route("/account/tokens/create", post(handlers::login::pat_create))
+        .route("/account/tokens/revoke", post(handlers::login::pat_revoke))
         .route(
             "/account/password",
             post(handlers::register::change_password),
@@ -228,8 +244,8 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
     // takes effect on the next restart). When unset, no gateway client is seeded so
     // default behavior is unchanged.
     if let Some(secret) = config.gw_client_secret.as_deref() {
-        let hash = auth::hash_password(secret)
-            .map_err(|e| format!("hash gateway client secret: {e}"))?;
+        let hash =
+            auth::hash_password(secret).map_err(|e| format!("hash gateway client secret: {e}"))?;
         store.put_client(config::gw_client(&config, hash)).await;
         tracing::info!(
             client_id = %config.gw_client_id,

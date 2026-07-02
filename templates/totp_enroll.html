@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Enable TOTP · HOLDFAST</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-console">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand brand--sm" href="/account" aria-label="HOLDFAST home"><span class="brand__glyph" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M24 4 8 9.5V22c0 11 7 17.4 16 21.5C33 39.4 40 33 40 22V9.5L24 4Z" fill="#4F46E5"/><rect x="20" y="19" width="8" height="13" rx="1" fill="#fff" fill-opacity="0.92"/><path d="M20 19v-2.5a4 4 0 0 1 8 0V19" stroke="#fff" stroke-width="2" stroke-opacity="0.92" fill="none"/></svg></span><span class="brand__word">HOLDFAST</span></a>
+      <div class="topbar__right"><span class="user-email">{{EMAIL}}</span><a class="btn btn-ghost btn-sm" href="/account">Account</a></div>
+    </div>
+  </header>
+  <main class="console">
+    <div class="console__head">
+      <h1>Enable TOTP</h1>
+      <p class="muted">Scan the QR code or enter the manual key.</p>
+    </div>
+    <section class="card">
+      <div class="card__body">
+        <div class="alert-area" role="alert" aria-live="assertive">{{ERROR}}</div>
+        <div class="totp-setup">
+          <div class="totp-qr">{{QR}}</div>
+          <div class="totp-secret">
+            <div class="muted">Manual key</div>
+            <code>{{SECRET}}</code>
+            <a class="link-muted" href="{{OTPAUTH}}">Open authenticator link</a>
+          </div>
+        </div>
+        <form class="auth-form" method="post" action="/account/mfa/totp/verify">
+          <input type="hidden" name="csrf_token" value="{{CSRF}}">
+          <div class="field">
+            <label for="totp_code">Verification code</label>
+            <input id="totp_code" name="code" type="text" inputmode="numeric"
+                   autocomplete="one-time-code" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Enable TOTP</button>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -18,7 +18,10 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use keystone::config::{seed_client, seed_user};
-use keystone::store::{new_opaque_code, AuthCode, Credential, PgStore, Session, WebauthnState};
+use keystone::store::{
+    new_opaque_code, AuthCode, Credential, LoginEvent, PersonalAccessToken, PgStore, Session,
+    TotpChallenge, TotpConfig, WebauthnState,
+};
 use keystone::{now_secs, AppState};
 use serde_json::Value;
 use tower::ServiceExt;
@@ -191,7 +194,10 @@ async fn pg_store_full_integration() {
         .await
         .iter()
         .any(|s| s.id == sess.id));
-    state.store.revoke_other_sessions("u_admin", "some-other-id").await;
+    state
+        .store
+        .revoke_other_sessions("u_admin", "some-other-id")
+        .await;
     assert!(
         state.store.get_session(&sess.id).await.is_none(),
         "revoke_other_sessions removed the non-kept session"
@@ -204,6 +210,89 @@ async fn pg_store_full_integration() {
         "session deleted"
     );
 
+    // TOTP config + recovery codes + login challenge.
+    state
+        .store
+        .put_totp(TotpConfig {
+            user_sub: "u_admin".to_string(),
+            secret: "JBSWY3DPEHPK3PXP".to_string(),
+            enabled: true,
+            created_at: now_secs(),
+            verified_at: now_secs(),
+        })
+        .await;
+    assert!(state.store.get_totp("u_admin").await.unwrap().enabled);
+    state
+        .store
+        .put_recovery_codes(
+            "u_admin",
+            vec!["hash-a".to_string(), "hash-b".to_string()],
+            now_secs(),
+        )
+        .await;
+    assert_eq!(state.store.recovery_code_count("u_admin").await, 2);
+    assert!(state.store.take_recovery_code("u_admin", "hash-a").await);
+    assert!(!state.store.take_recovery_code("u_admin", "hash-a").await);
+    let challenge = TotpChallenge {
+        id: new_opaque_code(),
+        user_sub: "u_admin".to_string(),
+        return_to: "/account".to_string(),
+        user_agent: "pg-totp-agent".to_string(),
+        ip: "10.0.0.2".to_string(),
+        expires_at: now_secs() + 300,
+    };
+    state.store.put_totp_challenge(challenge.clone()).await;
+    assert_eq!(
+        state
+            .store
+            .take_totp_challenge(&challenge.id)
+            .await
+            .map(|c| c.user_agent),
+        Some("pg-totp-agent".to_string())
+    );
+    assert!(state
+        .store
+        .take_totp_challenge(&challenge.id)
+        .await
+        .is_none());
+    state.store.delete_totp("u_admin").await;
+    assert!(state.store.get_totp("u_admin").await.is_none());
+    assert_eq!(state.store.recovery_code_count("u_admin").await, 0);
+
+    // Login history and personal access tokens.
+    state
+        .store
+        .put_login_event(LoginEvent {
+            id: new_opaque_code(),
+            user_sub: "u_admin".to_string(),
+            username: "admin@holdfast.local".to_string(),
+            occurred_at: now_secs(),
+            ip: "10.0.0.3".to_string(),
+            user_agent: "pg-history-agent".to_string(),
+            method: "password".to_string(),
+            result: "success".to_string(),
+            detail: "password login".to_string(),
+        })
+        .await;
+    assert_eq!(state.store.list_login_events("u_admin", 10).await.len(), 1);
+    let pat = PersonalAccessToken {
+        id: new_opaque_code(),
+        user_sub: "u_admin".to_string(),
+        name: "pg token".to_string(),
+        token_hash: "sha256-hash".to_string(),
+        scopes: "profile".to_string(),
+        created_at: now_secs(),
+        expires_at: now_secs() + 86400,
+        revoked_at: 0,
+    };
+    state.store.put_personal_token(pat.clone()).await;
+    assert_eq!(state.store.list_personal_tokens("u_admin").await.len(), 1);
+    state
+        .store
+        .revoke_personal_token("u_admin", &pat.id, now_secs())
+        .await;
+    assert!(state.store.list_personal_tokens("u_admin").await.is_empty());
+
     // webauthn credentials: put -> list -> get -> update passkey.
     let cred = Credential {
         cred_id: "cred-pg-1".to_string(),
@@ -214,7 +303,11 @@ async fn pg_store_full_integration() {
     state.store.put_credential(cred.clone()).await;
     assert_eq!(state.store.list_credentials("u_admin").await.len(), 1);
     assert_eq!(
-        state.store.get_credential("cred-pg-1").await.map(|c| c.passkey),
+        state
+            .store
+            .get_credential("cred-pg-1")
+            .await
+            .map(|c| c.passkey),
         Some(r#"{"v":1}"#.to_string())
     );
     state
@@ -222,7 +315,11 @@ async fn pg_store_full_integration() {
         .update_credential_passkey("cred-pg-1", r#"{"v":2}"#)
         .await;
     assert_eq!(
-        state.store.get_credential("cred-pg-1").await.map(|c| c.passkey),
+        state
+            .store
+            .get_credential("cred-pg-1")
+            .await
+            .map(|c| c.passkey),
         Some(r#"{"v":2}"#.to_string()),
         "counter/passkey update persisted"
     );
@@ -323,7 +420,8 @@ async fn authorize_ok(state: &AppState) -> (String, String) {
          &code_challenge_method=S256&nonce=n-abc"
     );
     // `/authorize` now gates on a session; establish one for the seeded admin.
-    let session_cookie = keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session_cookie =
+        keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
     let req = Request::builder()
         .uri(uri)
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))

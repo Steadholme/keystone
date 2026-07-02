@@ -87,6 +87,13 @@
             <span class="spinner" aria-hidden="true"></span>
           </button>
           <div id="reg-status" class="status" role="status" aria-live="polite"></div>
+          <div class="security-row">
+            <div>
+              <div class="security-row__title">Authenticator app</div>
+              <div class="security-row__sub">{{TOTP_STATUS}}</div>
+            </div>
+            {{TOTP_CONTROLS}}
+          </div>
         </div>
         <div class="card__note">You are signed in to <code>{{SUB}}</code>. Sessions end automatically after inactivity or when you log out.</div>
       </section>
@@ -105,6 +112,53 @@
           {{REVOKE_ALL}}
         </div>
         <div class="card__note">Ending a session signs that device out of single sign-on. Access it already holds to apps may persist until those sessions expire (up to 8 hours).</div>
+      </section>
+
+      <!-- Login history -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Login history</h2>
+          <span class="pill">Latest 10</span>
+        </div>
+        <div class="card__body">
+          <div class="history-list">
+            {{LOGIN_EVENTS}}
+          </div>
+        </div>
+      </section>
+
+      <!-- Personal access tokens -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Personal access tokens</h2>
+        </div>
+        <div class="card__body">
+          <div class="token-list">
+            {{TOKENS}}
+          </div>
+          <form class="token-create" method="post" action="/account/tokens/create">
+            <input type="hidden" name="csrf_token" value="{{CSRF}}">
+            <div class="field">
+              <label for="pat_name">Token name</label>
+              <input id="pat_name" name="name" type="text" maxlength="80" required>
+            </div>
+            <div class="field">
+              <label for="pat_scopes">Scopes</label>
+              <input id="pat_scopes" name="scopes" type="text" value="profile" required>
+            </div>
+            <div class="field">
+              <label for="pat_expiry">Expiry days</label>
+              <input id="pat_expiry" name="expiry_days" type="text" inputmode="numeric" value="30" required>
+            </div>
+            <div class="field">
+              <label for="pat_password">Current password</label>
+              <input id="pat_password" name="current_password" type="password"
+                     autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="btn btn-secondary">Create token</button>
+          </form>
+        </div>
+        <div class="card__note">Token secret values are shown once. Keystone stores only a hash.</div>
       </section>
 
       <!-- Change password -->

@@ -42,6 +42,27 @@ fn get_with_cookie(uri: &str, cookie: &str) -> Request<Body> {
         .unwrap()
 }
 
+fn post_form(uri: &str, cookie: Option<&str>, body: String) -> Request<Body> {
+    let mut b = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    b.body(Body::from(body)).unwrap()
+}
+
+fn body_str(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).to_string()
+}
+
+fn hidden_value(html: &str, name: &str) -> String {
+    let marker = format!(r#"name="{name}" value=""#);
+    let start = html.find(&marker).expect("hidden field present") + marker.len();
+    html[start..].chars().take_while(|c| *c != '"').collect()
+}
+
 /// First `name=value` from any `Set-Cookie` response header.
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     for hv in headers.get_all(header::SET_COOKIE).iter() {
@@ -123,7 +144,8 @@ async fn authorize_without_session_redirects_to_login() {
     );
 
     // With a session -> 302 straight back to the redirect_uri with a code.
-    let session = keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session =
+        keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
     let (status, headers, _) = call(
         &state,
         get_with_cookie(&authorize_uri(), &format!("__Host-session={session}")),
@@ -246,7 +268,10 @@ async fn account_lists_sessions_and_revoke_all_keeps_current() {
     let (status, headers, body) = call(&state, get_with_cookie("/account", &cookie_a)).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8_lossy(&body);
-    assert!(html.contains("Chrome · Windows"), "device A labelled: {html:.0}");
+    assert!(
+        html.contains("Chrome · Windows"),
+        "device A labelled: {html:.0}"
+    );
     assert!(html.contains("Safari · iOS"), "device B labelled");
     assert!(html.contains("This device"), "current session badged");
     assert!(html.contains("2 active"), "session count shown");
@@ -268,7 +293,11 @@ async fn account_lists_sessions_and_revoke_all_keeps_current() {
 
     // A still works; B is gone (its /account now bounces to /login).
     let (status, _, _) = call(&state, get_with_cookie("/account", &cookie_a)).await;
-    assert_eq!(status, StatusCode::OK, "current session survives revoke-all");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "current session survives revoke-all"
+    );
     let (status, headers, _) = call(&state, get_with_cookie("/account", &cookie_b)).await;
     assert_eq!(status, StatusCode::FOUND, "other session was revoked");
     assert_eq!(location(&headers), "/login");
@@ -277,8 +306,10 @@ async fn account_lists_sessions_and_revoke_all_keeps_current() {
 #[tokio::test]
 async fn revoke_one_session_by_id_is_owner_scoped() {
     let state = keystone::build_dev_state();
-    let sess_a = keystone::auth::create_session(&state, "u_admin", "Chrome/120", "203.0.113.1").await;
-    let sess_b = keystone::auth::create_session(&state, "u_admin", "Safari/17", "203.0.113.2").await;
+    let sess_a =
+        keystone::auth::create_session(&state, "u_admin", "Chrome/120", "203.0.113.1").await;
+    let sess_b =
+        keystone::auth::create_session(&state, "u_admin", "Safari/17", "203.0.113.2").await;
     let cookie_a = format!("__Host-session={sess_a}");
 
     // Discover B's opaque id from A's account listing (it is embedded in the revoke form).
@@ -328,4 +359,192 @@ async fn login_without_csrf_is_rejected() {
         "missing CSRF cookie is rejected"
     );
     assert!(cookie_value(&headers, "__Host-session").is_none());
+}
+
+#[tokio::test]
+async fn totp_enrollment_requires_second_factor_after_password() {
+    let state = keystone::build_dev_state();
+    let hash = keystone::auth::hash_password(PASSWORD).unwrap();
+    state.store.set_password_hash("u_admin", &hash).await;
+    let signed =
+        keystone::auth::create_session(&state, "u_admin", "Mozilla/5.0 Chrome/120", "203.0.113.9")
+            .await;
+    let session_cookie = format!("__Host-session={signed}");
+
+    // Start enrollment from the authenticated account page.
+    let (_, headers, _) = call(&state, get_with_cookie("/account", &session_cookie)).await;
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, headers, body) = call(
+        &state,
+        post_form(
+            "/account/mfa/totp/enroll",
+            Some(&format!("{session_cookie}; __Host-csrf={csrf}")),
+            format!("csrf_token={csrf}&current_password={PASSWORD}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body_str(&body).contains("Manual key"));
+    let pending = state.store.get_totp("u_admin").await.expect("totp pending");
+    assert!(!pending.enabled, "enrollment starts pending");
+
+    // Verify the current TOTP code and receive one-time recovery codes.
+    let code = keystone::totp::code_at(&pending.secret, keystone::now_secs()).unwrap();
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, _, body) = call(
+        &state,
+        post_form(
+            "/account/mfa/totp/verify",
+            Some(&format!("{session_cookie}; __Host-csrf={csrf}")),
+            format!("csrf_token={csrf}&code={code}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body_str(&body).contains("Recovery codes"));
+    let enabled = state.store.get_totp("u_admin").await.unwrap();
+    assert!(enabled.enabled, "totp enabled after first verified code");
+    assert_eq!(state.store.recovery_code_count("u_admin").await, 10);
+
+    // Password alone no longer creates a session; it renders the TOTP challenge.
+    let (_, headers, _) = call(&state, get("/login")).await;
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, headers, body) = call(
+        &state,
+        post_form(
+            "/login",
+            Some(&format!("__Host-csrf={csrf}")),
+            format!(
+                "username=admin@holdfast.local&password={PASSWORD}&csrf_token={csrf}&return_to=%2Faccount"
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "TOTP challenge is rendered");
+    assert!(
+        cookie_value(&headers, "__Host-session").is_none(),
+        "password step alone grants no session"
+    );
+    let html = body_str(&body);
+    assert!(html.contains("Two-step verification"));
+    let challenge_id = hidden_value(&html, "challenge_id");
+
+    // The TOTP code completes login and yields the normal session cookie.
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let code = keystone::totp::code_at(&enabled.secret, keystone::now_secs()).unwrap();
+    let (status, headers, _) = call(
+        &state,
+        post_form(
+            "/login/totp",
+            Some(&format!("__Host-csrf={csrf}")),
+            format!("csrf_token={csrf}&challenge_id={challenge_id}&code={code}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(location(&headers), "/account");
+    let session = cookie_value(&headers, "__Host-session").expect("session after TOTP");
+
+    let (status, _, body) = call(
+        &state,
+        get_with_cookie("/account", &format!("__Host-session={session}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let html = body_str(&body);
+    assert!(html.contains("Authenticator app"));
+    assert!(html.contains("Login history"));
+    assert!(html.contains("totp"));
+    assert!(html.contains("success"));
+}
+
+#[tokio::test]
+async fn personal_tokens_are_hashed_shown_once_and_revocable() {
+    let state = keystone::build_dev_state();
+    let hash = keystone::auth::hash_password(PASSWORD).unwrap();
+    state.store.set_password_hash("u_admin", &hash).await;
+    let signed = keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session_cookie = format!("__Host-session={signed}");
+
+    let (_, headers, _) = call(&state, get_with_cookie("/account", &session_cookie)).await;
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, _, body) = call(
+        &state,
+        post_form(
+            "/account/tokens/create",
+            Some(&format!("{session_cookie}; __Host-csrf={csrf}")),
+            format!(
+                "csrf_token={csrf}&name=deploy&scopes=profile+admin:read&expiry_days=30&current_password={PASSWORD}"
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let html = body_str(&body);
+    let token_start = html.find("pat_").expect("plaintext token shown once");
+    let plaintext: String = html[token_start..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+        .collect();
+    assert!(plaintext.starts_with("pat_"));
+
+    let tokens = state.store.list_personal_tokens("u_admin").await;
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].name, "deploy");
+    assert_ne!(tokens[0].token_hash, plaintext, "store keeps only a hash");
+
+    let (status, headers, body) = call(&state, get_with_cookie("/account", &session_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    let account_html = body_str(&body);
+    assert!(account_html.contains("deploy"));
+    assert!(
+        !account_html.contains(&plaintext),
+        "plaintext token is not rendered by account page"
+    );
+
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, _, _) = call(
+        &state,
+        post_form(
+            "/account/tokens/revoke",
+            Some(&format!("{session_cookie}; __Host-csrf={csrf}")),
+            format!("csrf_token={csrf}&token_id={}", tokens[0].id),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(state.store.list_personal_tokens("u_admin").await.is_empty());
+}
+
+#[tokio::test]
+async fn login_history_records_password_failures() {
+    let state = keystone::build_dev_state();
+    let hash = keystone::auth::hash_password(PASSWORD).unwrap();
+    state.store.set_password_hash("u_admin", &hash).await;
+
+    let (_, headers, _) = call(&state, get("/login")).await;
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, _, _) = call(
+        &state,
+        post_form(
+            "/login",
+            Some(&format!("__Host-csrf={csrf}")),
+            format!(
+                "username=admin@holdfast.local&password=wrong&csrf_token={csrf}&return_to=%2Faccount"
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let events = state.store.list_login_events("u_admin", 10).await;
+    assert!(events.iter().any(|e| e.result == "failure"));
+
+    let signed = keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
+    let (status, _, body) = call(
+        &state,
+        get_with_cookie("/account", &format!("__Host-session={signed}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body_str(&body).contains("Failed"));
 }

@@ -34,6 +34,8 @@ rsa = "0.9"
 base64 = "0.22"
 # SHA-256 for PKCE S256 verification and the RFC 7638 kid thumbprint.
 sha2 = "0.10"
+# SHA-1 for RFC 6238 TOTP (HMAC-SHA1, pure Rust).
+sha1 = "0.10"
 # (De)serialize request params and Claims; serialize discovery/JWKS/token/userinfo responses.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -60,6 +62,8 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 # HMAC-SHA256 over the opaque session id, keyed by SESSION_SECRET, so a tampered
 # `__Host-session` cookie is rejected before any store lookup (defense in depth).
 hmac = "0.12"
+# Offline QR rendering for TOTP otpauth enrollment.
+qrcode = "0.14"
 # Internal mTLS server (env-toggled, default OFF) for the keystone<->sluice hop.
 # rustls is PINNED to the `ring` provider (passed explicitly to the ServerConfig /
 # client-verifier builders) to MATCH the provider sqlx already compiles — this avoids

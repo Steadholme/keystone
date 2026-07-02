@@ -433,6 +433,23 @@ input[type="email"]:focus {
   .brand-panel__inner { max-width: none; }
 }
 
+@media (max-width: 720px) {
+  .security-row,
+  .inline-secure-form,
+  .history-row,
+  .token-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .inline-secure-form input { width: 100%; }
+  .token-create,
+  .totp-setup { grid-template-columns: 1fr; }
+  .totp-qr {
+    width: 100%;
+    max-width: 240px;
+  }
+}
+
 /* ==========================================================================
    LAYOUT — account console (.page-console)
    ========================================================================== */
@@ -583,6 +600,36 @@ code {
   background: var(--success);
 }
 
+.security-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--border);
+}
+.security-row__title { font-weight: 600; color: var(--text); }
+.security-row__sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: 3px;
+  font-size: var(--fs-sm);
+}
+.inline-secure-form {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.inline-secure-form input {
+  width: 180px;
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+}
+
 /* --- Active sessions ------------------------------------------------------ */
 .session-list {
   display: flex;
@@ -610,6 +657,86 @@ code {
 .session-row__sub { font-size: var(--fs-xs); margin-top: 2px; }
 .session-row__action { margin: 0; }
 .revoke-all { margin-top: 4px; }
+
+/* --- Login history + personal tokens ------------------------------------- */
+.history-list,
+.token-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-row,
+.token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.history-row__main,
+.token-row__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  color: var(--text);
+}
+.history-row__sub,
+.token-row__sub { font-size: var(--fs-xs); margin-top: 2px; }
+.token-row__action { margin: 0; }
+.token-create {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 120px 1fr auto;
+  align-items: end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--border);
+}
+.token-create .field { margin-bottom: 0; }
+
+/* --- TOTP setup + one-time secret display -------------------------------- */
+.totp-setup {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--sp-6);
+  align-items: center;
+  margin-bottom: var(--sp-6);
+}
+.totp-qr {
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.totp-qr svg { width: 192px; height: 192px; display: block; }
+.totp-secret {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
+}
+.recovery-grid code,
+.secret-once code {
+  display: block;
+  padding: 11px 13px;
+  word-break: break-all;
+}
+.secret-once { margin-bottom: var(--sp-5); }
 
 /* --- OAuth consent ------------------------------------------------------- */
 .scope-list {

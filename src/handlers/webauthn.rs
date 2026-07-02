@@ -59,9 +59,11 @@ pub async fn register_begin(
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     check_csrf(&headers)?;
-    let session = auth::current_session(&state, &headers).await.ok_or_else(|| {
-        AppError::Unauthorized("login required to register a passkey".to_string())
-    })?;
+    let session = auth::current_session(&state, &headers)
+        .await
+        .ok_or_else(|| {
+            AppError::Unauthorized("login required to register a passkey".to_string())
+        })?;
     let user = state
         .store
         .get_user(&session.user_sub)
@@ -111,9 +113,11 @@ pub async fn register_finish(
     Json(cred): Json<RegisterPublicKeyCredential>,
 ) -> Result<Response, AppError> {
     check_csrf(&headers)?;
-    let session = auth::current_session(&state, &headers).await.ok_or_else(|| {
-        AppError::Unauthorized("login required to register a passkey".to_string())
-    })?;
+    let session = auth::current_session(&state, &headers)
+        .await
+        .ok_or_else(|| {
+            AppError::Unauthorized("login required to register a passkey".to_string())
+        })?;
 
     let reg_state: PasskeyRegistration = take_ceremony(&state, &headers, KIND_REG).await?;
     let passkey = state
@@ -262,6 +266,16 @@ pub async fn authenticate_finish(
         &crate::handlers::register::client_ip(&headers),
     )
     .await;
+    crate::handlers::login::record_login_event(
+        &state,
+        &stored.user_sub,
+        &actor,
+        "passkey",
+        "success",
+        "passkey login",
+        &headers,
+    )
+    .await;
     state.audit.emit(AuditEvent::info(
         "webauthn.authenticate.success",
         &actor,
@@ -287,11 +301,10 @@ async fn take_ceremony<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, AppError> {
     let state_id = auth::get_cookie(headers, auth::WA_STATE_COOKIE)
         .ok_or_else(|| AppError::InvalidRequest("no ceremony in progress".to_string()))?;
-    let row = state
-        .store
-        .take_state(&state_id)
-        .await
-        .ok_or_else(|| AppError::InvalidRequest("ceremony state expired or missing".to_string()))?;
+    let row =
+        state.store.take_state(&state_id).await.ok_or_else(|| {
+            AppError::InvalidRequest("ceremony state expired or missing".to_string())
+        })?;
     if row.kind != kind || now_secs() > row.expires_at {
         return Err(AppError::InvalidRequest(
             "ceremony state invalid".to_string(),
