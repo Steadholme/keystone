@@ -289,6 +289,30 @@ async fn revoke_sessions_ends_all_target_sessions() {
 }
 
 #[tokio::test]
+async fn disable_revokes_existing_sessions() {
+    // A6: disabling an account must terminate its LIVE sessions, not merely block new logins —
+    // otherwise the disabled user keeps access until each session's TTL lapses.
+    let state = setup().await;
+    let admin = session_cookie(&state, "u_admin").await;
+    let member = session_cookie(&state, "u_member").await;
+
+    // The member has a live session before being disabled.
+    let (status, _, _) = call(&state, get_with_cookie("/account", &member)).await;
+    assert_eq!(status, StatusCode::OK, "member session live before disable");
+
+    let (status, _, _) = admin_action(&state, &admin, "/admin/users/disable", "u_member").await;
+    assert_eq!(status, StatusCode::FOUND);
+
+    // Disable revoked the existing session: the once-valid cookie no longer reaches /account.
+    let (status, _, _) = call(&state, get_with_cookie("/account", &member)).await;
+    assert_eq!(
+        status,
+        StatusCode::FOUND,
+        "member session revoked immediately on disable"
+    );
+}
+
+#[tokio::test]
 async fn toggle_admin_grants_console_access() {
     let state = setup().await;
     let admin = session_cookie(&state, "u_admin").await;

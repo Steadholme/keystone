@@ -170,6 +170,13 @@ pub async fn authenticate_begin(
         .get_user_by_username(&body.username)
         .await
         .ok_or_else(|| AppError::InvalidRequest("no passkeys for that user".to_string()))?;
+    // A disabled account cannot start a passkey ceremony (defense in depth; finish re-checks).
+    // Return the SAME opaque error as "no passkeys" so a disabled account can't be probed.
+    if user.disabled {
+        return Err(AppError::InvalidRequest(
+            "no passkeys for that user".to_string(),
+        ));
+    }
 
     let passkeys: Vec<Passkey> = state
         .store
@@ -252,13 +259,53 @@ pub async fn authenticate_finish(
         }
     }
 
-    // Resolve the user's email for the audit actor (best-effort).
-    let actor = state
+    // Resolve the owning user and enforce the SAME gates as the password path (login.rs): a
+    // disabled or unverified account cannot complete passkey login. Without this, a user disabled
+    // AFTER registering a passkey could still authenticate and mint a session.
+    let user = state
         .store
         .get_user(&stored.user_sub)
         .await
-        .map(|u| u.email)
-        .unwrap_or_else(|| stored.user_sub.clone());
+        .ok_or_else(|| AppError::Unauthorized("unknown user".to_string()))?;
+    if user.disabled {
+        crate::handlers::login::record_login_event(
+            &state,
+            &user.sub,
+            &user.email,
+            "passkey",
+            "failure",
+            "account disabled",
+            &headers,
+        )
+        .await;
+        state.audit.emit(AuditEvent::warning(
+            "webauthn.authenticate.failure",
+            &user.email,
+            "passkey",
+            "account disabled",
+        ));
+        return Err(AppError::Unauthorized("account disabled".to_string()));
+    }
+    if !user.email_verified {
+        crate::handlers::login::record_login_event(
+            &state,
+            &user.sub,
+            &user.email,
+            "passkey",
+            "failure",
+            "email not verified",
+            &headers,
+        )
+        .await;
+        state.audit.emit(AuditEvent::warning(
+            "webauthn.authenticate.failure",
+            &user.email,
+            "passkey",
+            "email not verified",
+        ));
+        return Err(AppError::Unauthorized("email not verified".to_string()));
+    }
+    let actor = user.email.clone();
     let session_cookie = auth::create_session(
         &state,
         &stored.user_sub,

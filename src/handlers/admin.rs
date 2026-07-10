@@ -124,11 +124,15 @@ pub async fn disable_user(
         return admin_reject("No such user.");
     };
     state.store.set_disabled(&target.sub, true).await;
+    // Disabling must also terminate the account's live sessions — otherwise the disabled user keeps
+    // access until each session's TTL lapses. Reuse the owner-scoped revoke (empty keep_id => all),
+    // exactly as `revoke_user_sessions` does.
+    state.store.revoke_other_sessions(&target.sub, "").await;
     state.audit.emit(AuditEvent::info(
         "admin.user.disable",
         &admin.email,
         &target.email,
-        "account disabled by admin",
+        "account disabled by admin (sessions revoked)",
     ));
     redirect("/admin", &[])
 }
