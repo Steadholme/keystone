@@ -28,3 +28,17 @@ pub async fn serve(Path(file): Path<String>) -> Response {
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_css_tracks_the_odyssey_material_contract() {
+        assert!(APP_CSS.contains("Odyssey 1.1 adapter"));
+        assert!(APP_CSS.contains("--c-oxide-600: #B6422C"));
+        assert!(APP_CSS.contains("--c-paper-50: #F2F0E8"));
+        assert!(APP_CSS.contains("background-size: 48px 48px"));
+        assert!(!APP_CSS.contains("--accent: #4F46E5"));
+    }
+}

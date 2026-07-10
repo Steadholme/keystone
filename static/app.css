@@ -1,33 +1,54 @@
 /* ==========================================================================
-   HOLDFAST — Keystone sign-in design system
+   HOLDFAST — Keystone sign-in design system · Odyssey 1.1 adapter
    Enterprise IdP surface (Okta/Auth0/Ping-class). Server-rendered, embedded.
    Tokens first, then primitives (buttons/inputs/cards/chips/alerts), then the
    two layouts: .page-auth (split-screen sign-in) and .page-console (/account).
    ========================================================================== */
 
 :root {
-  /* --- Brand (deep slate/navy keep) --- */
-  --brand-900: #0B1220;
-  --brand-800: #0F172A;
-  --brand-700: #15213b;
-  --brand-grad: linear-gradient(160deg, #0B1220 0%, #0F172A 55%, #15213b 100%);
+  /* Odyssey canonical mineral paper / basalt / oxide primitives. */
+  --c-paper-0: #FAF9F4;
+  --c-paper-25: #F5F3EC;
+  --c-paper-50: #F2F0E8;
+  --c-paper-75: #ECE9DF;
+  --c-paper-100: #E9E6DC;
+  --c-paper-200: #CFCABD;
+  --c-paper-300: #8D887C;
+  --c-basalt-900: #191C18;
+  --c-basalt-700: #454B43;
+  --c-basalt-500: #5F665B;
+  --c-basalt-400: #6D7469;
+  --c-oxide-700: #8F2F1E;
+  --c-oxide-600: #B6422C;
+  --c-oxide-500: #D85D3F;
+  --c-oxide-100: #EAC9BE;
+  --c-oxide-50: #F4E4DE;
+
+  /* --- Brand (Odyssey basalt keep) --- */
+  --brand-900: var(--c-basalt-900);
+  --brand-800: #20241F;
+  --brand-700: #2B302A;
+  --brand-grad:
+    linear-gradient(145deg, transparent 0 68%, rgba(216, 93, 63, 0.14) 68% 69%, transparent 69%),
+    linear-gradient(160deg, var(--brand-900) 0%, var(--brand-800) 58%, var(--brand-700) 100%);
 
   /* --- Surfaces & text (light) --- */
-  --surface: #FFFFFF;
-  --surface-2: #F8FAFC;
-  --surface-3: #F1F5F9;
-  --text: #0F172A;
-  --text-muted: #475569;
-  --text-subtle: #64748B;
-  --on-brand: #E2E8F0;
-  --on-brand-muted: #94A3B8;
+  --surface: var(--c-paper-0);
+  --surface-2: var(--c-paper-50);
+  --surface-3: var(--c-paper-75);
+  --text: var(--c-basalt-900);
+  --text-muted: var(--c-basalt-700);
+  --text-subtle: var(--c-basalt-500);
+  --on-brand: var(--c-paper-0);
+  --on-brand-muted: var(--c-paper-200);
+  --on-brand-accent: var(--c-oxide-100);
 
   /* --- Accent + status --- */
-  --accent: #4F46E5;
-  --accent-hover: #4338CA;
-  --accent-active: #3730A3;
-  --accent-ring: rgba(79, 70, 229, 0.35);
-  --accent-soft: #EEF2FF;
+  --accent: var(--c-oxide-600);
+  --accent-hover: var(--c-oxide-700);
+  --accent-active: #702417;
+  --accent-ring: rgba(182, 66, 44, 0.30);
+  --accent-soft: var(--c-oxide-50);
   --success: #16A34A;
   --success-soft: #F0FDF4;
   --success-border: #BBF7D0;
@@ -36,19 +57,20 @@
   --danger-border: #FECACA;
 
   /* --- Lines --- */
-  --border: #E2E8F0;
-  --border-strong: #CBD5E1;
+  --border: var(--c-paper-200);
+  --border-strong: var(--c-paper-300);
+  --grid-line: color-mix(in srgb, var(--text) 6%, transparent);
 
   /* --- Radius --- */
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-lg: 7px;
   --radius-pill: 999px;
 
   /* --- Shadow (soft, layered) --- */
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 18px 40px -12px rgba(15, 23, 42, 0.22);
+  --shadow-sm: 2px 2px 0 rgba(25, 28, 24, 0.08);
+  --shadow-md: 4px 4px 0 rgba(25, 28, 24, 0.11);
+  --shadow-lg: 0 16px 40px rgba(25, 28, 24, 0.16), 3px 3px 0 rgba(25, 28, 24, 0.10);
 
   /* --- Spacing scale (4px base) --- */
   --sp-1: 4px;
@@ -79,7 +101,11 @@ html, body { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--surface-2);
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
   color: var(--text);
   font-family: var(--font);
   font-size: var(--fs-base);
@@ -107,8 +133,13 @@ a:hover { text-decoration: underline; }
   width: 40px;
   height: 40px;
   flex: none;
+  color: var(--accent);
 }
 .brand__glyph svg { width: 100%; height: 100%; display: block; }
+.brand__glyph stop:first-child { stop-color: var(--c-oxide-500); }
+.brand__glyph stop:last-child { stop-color: var(--c-oxide-600); }
+.brand__glyph [fill="#4F46E5"] { fill: currentColor; }
+.brand__glyph [fill="#818CF8"] { fill: var(--c-oxide-500); }
 .brand__word {
   font-size: var(--fs-xl);
   font-weight: 700;
@@ -312,7 +343,7 @@ input[type="email"]:focus {
   color: var(--on-brand);
 }
 .brand-panel__inner { position: relative; z-index: 1; max-width: 420px; }
-.brand-panel .brand__word { color: #fff; }
+.brand-panel .brand__word { color: var(--on-brand); }
 .brand__tagline {
   margin: var(--sp-6) 0 0;
   font-size: var(--fs-xs);
@@ -321,13 +352,13 @@ input[type="email"]:focus {
   text-transform: uppercase;
   color: var(--accent);
 }
-.brand-panel .brand__tagline { color: #A5B4FC; }
+.brand-panel .brand__tagline { color: var(--on-brand-accent); }
 .brand__lede {
   margin: var(--sp-2) 0 0;
   font-size: var(--fs-2xl);
   font-weight: 600;
   line-height: 1.2;
-  color: #fff;
+  color: var(--on-brand);
   letter-spacing: -0.01em;
 }
 .trust-chips {
@@ -339,11 +370,11 @@ input[type="email"]:focus {
   list-style: none;
 }
 .brand-panel .chip {
-  background: rgba(148, 163, 184, 0.12);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  color: #E2E8F0;
+  background: color-mix(in srgb, var(--on-brand) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--on-brand) 20%, transparent);
+  color: var(--on-brand);
 }
-.brand-panel .chip svg { color: #A5B4FC; }
+.brand-panel .chip svg { color: var(--on-brand-accent); }
 
 /* Decorative keep watermark */
 .brand-watermark {
@@ -352,7 +383,7 @@ input[type="email"]:focus {
   bottom: -70px;
   width: 360px;
   height: 360px;
-  color: #fff;
+  color: var(--on-brand);
   opacity: 0.05;
   z-index: 0;
   pointer-events: none;
@@ -365,7 +396,11 @@ input[type="email"]:focus {
   align-items: center;
   justify-content: center;
   padding: var(--sp-6);
-  background: var(--surface-2);
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 .auth-card {
   width: 100%;
@@ -453,7 +488,13 @@ input[type="email"]:focus {
 /* ==========================================================================
    LAYOUT — account console (.page-console)
    ========================================================================== */
-.page-console { background: var(--surface-2); }
+.page-console {
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
 
 .topbar {
   background: var(--surface);
