@@ -125,7 +125,7 @@ mod tests {
             "u_admin",
             "sluice-dev",
             "openid email",
-            "admin@holdfast.local",
+            "admin@steadholme.local",
             Some("n-123".to_string()),
         )
         .unwrap();
@@ -136,7 +136,7 @@ mod tests {
         let decoding = keys.decoding_key();
 
         let data = decode::<IdTokenClaims>(&token, &decoding, &validation).unwrap();
-        assert_eq!(data.claims.email, "admin@holdfast.local");
+        assert_eq!(data.claims.email, "admin@steadholme.local");
         assert_eq!(data.claims.nonce.as_deref(), Some("n-123"));
     }
 }

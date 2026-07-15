@@ -74,7 +74,7 @@ async fn setup() -> AppState {
     let hash = keystone::auth::hash_password(USER_PASSWORD).unwrap();
     state
         .store
-        .create_user("u_member", "member@holdfast.local", &hash, keystone::now_secs())
+        .create_user("u_member", "member@steadholme.local", &hash, keystone::now_secs())
         .await
         .unwrap();
     state.store.set_email_verified("u_member").await;
@@ -144,7 +144,7 @@ async fn admin_page_is_session_and_admin_gated() {
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8_lossy(&body);
     assert!(html.contains("u_admin"), "user table lists the admin");
-    assert!(html.contains("member@holdfast.local"), "user table lists members");
+    assert!(html.contains("member@steadholme.local"), "user table lists members");
     assert!(html.contains("sluice-dev"), "clients table lists the seeded client");
     assert!(
         html.contains("http://127.0.0.1:9090/callback"),
@@ -160,7 +160,7 @@ async fn admin_search_filters_users() {
     let (status, _, body) = call(&state, get_with_cookie("/admin?q=member", &admin)).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8_lossy(&body);
-    assert!(html.contains("member@holdfast.local"), "match shown");
+    assert!(html.contains("member@steadholme.local"), "match shown");
     assert!(
         !html.contains("<code>u_admin</code>"),
         "non-matching user filtered out of the table"
@@ -177,7 +177,7 @@ async fn disable_blocks_login_before_password_and_enable_restores() {
     let admin = session_cookie(&state, "u_admin").await;
 
     // Sanity: the member can log in.
-    let (status, _, _) = login(&state, "member@holdfast.local", USER_PASSWORD).await;
+    let (status, _, _) = login(&state, "member@steadholme.local", USER_PASSWORD).await;
     assert_eq!(status, StatusCode::FOUND, "member logs in before disable");
 
     // Admin disables the member.
@@ -187,20 +187,20 @@ async fn disable_blocks_login_before_password_and_enable_restores() {
     assert_eq!(location(&headers), "/admin");
 
     // Disabled: 403 + clear message, and NO session — with the RIGHT password...
-    let (status, headers, body) = login(&state, "member@holdfast.local", USER_PASSWORD).await;
+    let (status, headers, body) = login(&state, "member@steadholme.local", USER_PASSWORD).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "disabled account is 403");
     assert!(String::from_utf8_lossy(&body).contains("disabled"));
     assert!(cookie_value(&headers, "__Host-session").is_none());
     // ...and identically with a WRONG password (the gate runs before the password check,
     // so the response cannot leak whether the password was correct).
-    let (status, _, body) = login(&state, "member@holdfast.local", "totally-wrong").await;
+    let (status, _, body) = login(&state, "member@steadholme.local", "totally-wrong").await;
     assert_eq!(status, StatusCode::FORBIDDEN, "same outcome regardless of password");
     assert!(String::from_utf8_lossy(&body).contains("disabled"));
 
     // Enable restores login.
     let (status, _, _) = admin_action(&state, &admin, "/admin/users/enable", "u_member").await;
     assert_eq!(status, StatusCode::FOUND);
-    let (status, _, _) = login(&state, "member@holdfast.local", USER_PASSWORD).await;
+    let (status, _, _) = login(&state, "member@steadholme.local", USER_PASSWORD).await;
     assert_eq!(status, StatusCode::FOUND, "member logs in again after enable");
 }
 
@@ -258,9 +258,9 @@ async fn forced_reset_link_completes_a_real_password_reset() {
     assert!(String::from_utf8_lossy(&body).contains("Password updated"));
 
     // Old password out, new password in.
-    let (status, _, _) = login(&state, "member@holdfast.local", USER_PASSWORD).await;
+    let (status, _, _) = login(&state, "member@steadholme.local", USER_PASSWORD).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "old password rejected");
-    let (status, _, _) = login(&state, "member@holdfast.local", "fresh-password-1").await;
+    let (status, _, _) = login(&state, "member@steadholme.local", "fresh-password-1").await;
     assert_eq!(status, StatusCode::FOUND, "new password accepted");
 }
 

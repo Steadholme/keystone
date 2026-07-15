@@ -159,7 +159,7 @@ docker run --rm -p 8080:8080 \
 
 - Client（公开）：`{ client_id: "sluice-dev", redirect_uris: ["http://127.0.0.1:9090/callback", "https://id.w33d.xyz/callback"] }`
 - Client（机密，仅当设置 `GW_CLIENT_SECRET` 时）：`{ client_id: "sluice-gw", redirect_uris: ["https://id.w33d.xyz/_gw/auth/callback"], client_secret_hash: Argon2id(...) }`
-- User：`{ sub: "u_admin", email: "admin@holdfast.local" }`
+- User：`{ sub: "u_admin", email: "admin@steadholme.local" }`
 
 ## 机密客户端（confidential clients）
 
@@ -253,7 +253,7 @@ curl --cacert tls/ca.crt --cert tls/client.crt --key tls/client.key \
 无浏览器的 passkey 证明已由 `tests/webauthn_flow.rs`（`SoftPasskey` 软件认证器）端到端覆盖；下面是**真人浏览器**流程：
 
 1. 部署后访问 `https://id.w33d.xyz/login`（需有效 TLS——`__Host-` cookie 与 WebAuthn 都要求 HTTPS）。
-2. 用 `BOOTSTRAP_ADMIN_PASSWORD` 设定的密码，以用户名 `admin@holdfast.local`（或 `u_admin`）走**密码兜底**登录 → 跳转 `/account`。
+2. 用 `BOOTSTRAP_ADMIN_PASSWORD` 设定的密码，以用户名 `admin@steadholme.local`（或 `u_admin`）走**密码兜底**登录 → 跳转 `/account`。
 3. 在 `/account` 点击 **“Register a passkey”**，按浏览器/系统提示用平台认证器（Touch ID / Windows Hello / 手机）完成注册；页面显示注册成功后 passkey 计数变为 1。
 4. 登出（`/logout`），回到 `/login`，在下半部输入用户名后点 **“Sign in with a passkey”** → 完成 WebAuthn 断言即**无密码登录**，跳回 `/account`。
 5. 端到端 OIDC：让 Sluice 发起 `GET https://id.w33d.xyz/authorize?...`（PKCE S256）。未登录会先 302 到 `/login`；完成上面的登录后回到 `/authorize` 即 302 携 `code` 回跳 `https://id.w33d.xyz/callback`，再由 `/token`、`/userinfo` 完成。

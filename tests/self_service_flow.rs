@@ -15,7 +15,7 @@ use keystone::store::VerificationToken;
 use keystone::{now_secs, AppState};
 use tower::ServiceExt;
 
-const EMAIL: &str = "newcomer@holdfast.local";
+const EMAIL: &str = "newcomer@steadholme.local";
 const PASSWORD: &str = "correct horse staple";
 const NEW_PASSWORD: &str = "an even longer secret";
 

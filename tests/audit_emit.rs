@@ -57,7 +57,7 @@ async fn login_failure_is_prompt_with_unreachable_audit_sink() {
 
     // POST /login with a WRONG password -> emits `login.failure`, returns 401.
     let body = format!(
-        "username=admin@holdfast.local&password=wrongpass&csrf_token={csrf}&return_to=%2Faccount"
+        "username=admin@steadholme.local&password=wrongpass&csrf_token={csrf}&return_to=%2Faccount"
     );
     let req = Request::builder()
         .method("POST")

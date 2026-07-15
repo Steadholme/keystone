@@ -79,7 +79,7 @@ async fn pg_store_full_integration() {
         .get_user("u_admin")
         .await
         .expect("seeded user present");
-    assert_eq!(user.email, "admin@holdfast.local");
+    assert_eq!(user.email, "admin@steadholme.local");
     assert!(
         state.store.get_user("nobody").await.is_none(),
         "unknown user"
@@ -155,7 +155,7 @@ async fn pg_store_full_integration() {
     state.store.set_password_hash("u_admin", &hash).await;
     let by_email = state
         .store
-        .get_user_by_username("admin@holdfast.local")
+        .get_user_by_username("admin@steadholme.local")
         .await
         .expect("lookup by email");
     assert_eq!(by_email.sub, "u_admin");
@@ -265,7 +265,7 @@ async fn pg_store_full_integration() {
         .put_login_event(LoginEvent {
             id: new_opaque_code(),
             user_sub: "u_admin".to_string(),
-            username: "admin@holdfast.local".to_string(),
+            username: "admin@steadholme.local".to_string(),
             occurred_at: now_secs(),
             ip: "10.0.0.3".to_string(),
             user_agent: "pg-history-agent".to_string(),
@@ -373,7 +373,7 @@ async fn pg_store_full_integration() {
     validation.set_audience(&[CLIENT_ID]);
     let id = decode::<Value>(&id_token, &decoding, &validation).unwrap();
     assert_eq!(id.claims["sub"], "u_admin");
-    assert_eq!(id.claims["email"], "admin@holdfast.local");
+    assert_eq!(id.claims["email"], "admin@steadholme.local");
 
     // Replay the consumed code -> invalid_grant (single-use through the HTTP path).
     let (status, _, body) = call(&state, token_request(&issued_code, REDIRECT_URI, VERIFIER)).await;
@@ -391,7 +391,7 @@ async fn pg_store_full_integration() {
     assert_eq!(status, StatusCode::OK);
     let ui: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(ui["sub"], "u_admin");
-    assert_eq!(ui["email"], "admin@holdfast.local");
+    assert_eq!(ui["email"], "admin@steadholme.local");
 
     println!("PG STORE INTEGRATION OK: migrate + idempotent seed + client/user/code round-trip + single-use + full authorize/token/userinfo flow against real Postgres");
 }

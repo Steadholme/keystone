@@ -283,7 +283,7 @@ mod tests {
     fn login_failure_serializes_safely_without_password() {
         let ev = AuditEvent::warning(
             "login.failure",
-            "alice@holdfast.local",
+            "alice@steadholme.local",
             "password",
             "invalid credentials",
         );
@@ -298,7 +298,7 @@ mod tests {
             vec!["action", "actor", "detail", "severity", "source", "target"]
         );
         assert_eq!(v["action"], "login.failure");
-        assert_eq!(v["actor"], "alice@holdfast.local");
+        assert_eq!(v["actor"], "alice@steadholme.local");
         assert_eq!(v["target"], "password");
         assert_eq!(v["severity"], "warning");
         assert_eq!(v["detail"], "invalid credentials");

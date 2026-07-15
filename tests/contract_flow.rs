@@ -144,7 +144,7 @@ async fn full_authorization_code_pkce_flow() {
     let id = decode::<Value>(&id_token, &decoding, &validation).unwrap();
     assert_eq!(id.header.kid.as_deref(), Some(kid));
     assert_eq!(id.claims["sub"], "u_admin");
-    assert_eq!(id.claims["email"], "admin@holdfast.local");
+    assert_eq!(id.claims["email"], "admin@steadholme.local");
     assert_eq!(id.claims["nonce"], "n-abc");
 
     // /userinfo with the access_token -> {sub, email}.
@@ -157,7 +157,7 @@ async fn full_authorization_code_pkce_flow() {
     assert_eq!(status, StatusCode::OK);
     let ui: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(ui["sub"], "u_admin");
-    assert_eq!(ui["email"], "admin@holdfast.local");
+    assert_eq!(ui["email"], "admin@steadholme.local");
 }
 
 #[tokio::test]

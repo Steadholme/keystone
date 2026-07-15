@@ -171,7 +171,7 @@ async fn password_login_creates_session_then_oidc_flow() {
 
     // 2. POST /login (double-submit CSRF) -> 302 + session cookie.
     let body = format!(
-        "username=admin@holdfast.local&password={PASSWORD}&csrf_token={csrf}&return_to=%2Faccount"
+        "username=admin@steadholme.local&password={PASSWORD}&csrf_token={csrf}&return_to=%2Faccount"
     );
     let req = Request::builder()
         .method("POST")
@@ -213,7 +213,7 @@ async fn password_login_creates_session_then_oidc_flow() {
     assert_eq!(status, StatusCode::OK);
     let ui: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(ui["sub"], "u_admin");
-    assert_eq!(ui["email"], "admin@holdfast.local");
+    assert_eq!(ui["email"], "admin@steadholme.local");
 }
 
 #[tokio::test]
@@ -225,7 +225,7 @@ async fn login_with_wrong_password_is_rejected_no_session() {
     let (_, headers, _) = call(&state, get("/login")).await;
     let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
     let body = format!(
-        "username=admin@holdfast.local&password=wrongpass&csrf_token={csrf}&return_to=%2Faccount"
+        "username=admin@steadholme.local&password=wrongpass&csrf_token={csrf}&return_to=%2Faccount"
     );
     let req = Request::builder()
         .method("POST")
@@ -344,7 +344,7 @@ async fn login_without_csrf_is_rejected() {
 
     // Submit a CSRF token in the form but DO NOT send the matching cookie.
     let body = format!(
-        "username=admin@holdfast.local&password={PASSWORD}&csrf_token=forged&return_to=%2Faccount"
+        "username=admin@steadholme.local&password={PASSWORD}&csrf_token=forged&return_to=%2Faccount"
     );
     let req = Request::builder()
         .method("POST")
@@ -415,7 +415,7 @@ async fn totp_enrollment_requires_second_factor_after_password() {
             "/login",
             Some(&format!("__Host-csrf={csrf}")),
             format!(
-                "username=admin@holdfast.local&password={PASSWORD}&csrf_token={csrf}&return_to=%2Faccount"
+                "username=admin@steadholme.local&password={PASSWORD}&csrf_token={csrf}&return_to=%2Faccount"
             ),
         ),
     )
@@ -530,7 +530,7 @@ async fn login_history_records_password_failures() {
             "/login",
             Some(&format!("__Host-csrf={csrf}")),
             format!(
-                "username=admin@holdfast.local&password=wrong&csrf_token={csrf}&return_to=%2Faccount"
+                "username=admin@steadholme.local&password=wrong&csrf_token={csrf}&return_to=%2Faccount"
             ),
         ),
     )

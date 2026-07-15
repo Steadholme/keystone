@@ -16,7 +16,7 @@ pub const SEED_REDIRECT_URI_PUBLIC: &str = "https://id.w33d.xyz/callback";
 /// Seed admin subject id.
 pub const SEED_USER_SUB: &str = "u_admin";
 /// Seed admin email (doubles as a login username).
-pub const SEED_USER_EMAIL: &str = "admin@holdfast.local";
+pub const SEED_USER_EMAIL: &str = "admin@steadholme.local";
 
 /// Default confidential gateway client id — Sluice acting as an OIDC RP with a secret.
 pub const DEFAULT_GW_CLIENT_ID: &str = "sluice-gw";
