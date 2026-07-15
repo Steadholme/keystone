@@ -103,17 +103,17 @@ docker rm -f ks-testpg
 
 ```bash
 # 构建镜像
-docker build -t holdfast/keystone:dev .
+docker build -t steadholme/keystone:dev .
 
 # 运行（内存存储）
-docker run --rm -p 8080:8080 -e KEYSTONE_STORE=memory holdfast/keystone:dev
+docker run --rm -p 8080:8080 -e KEYSTONE_STORE=memory steadholme/keystone:dev
 
 # 运行（Postgres 存储）
 docker run --rm -p 8080:8080 \
   -e KEYSTONE_STORE=postgres \
   -e DATABASE_URL=postgres://postgres:pw@db:5432/keystone \
   -e ISSUER=http://keystone:8080 \
-  holdfast/keystone:dev
+  steadholme/keystone:dev
 
 # 运行（持久化签名密钥 —— kid 跨重启稳定）
 # 镜像内置 /data 目录并 chown 给非 root uid 10001；挂一个具名卷到 /data 即可读写。
@@ -121,7 +121,7 @@ docker run --rm -p 8080:8080 \
   -e KEYSTONE_STORE=memory \
   -e SIGNING_KEY_PATH=/data/signing_key.pem \
   -v keystone_keys:/data \
-  holdfast/keystone:dev
+  steadholme/keystone:dev
 ```
 
 > 镜像以非 root（uid `10001`）运行，且内置 `mkdir -p /data && chown 10001:10001 /data`，
@@ -196,7 +196,7 @@ docker run --rm -p 8080:8080 \
 docker run --rm -e KEYSTONE_STORE=memory -e INTERNAL_TLS=on \
   -e INTERNAL_TLS_CERT=/tls/server.crt -e INTERNAL_TLS_KEY=/tls/server.key \
   -e INTERNAL_TLS_CLIENT_CA=/tls/ca.crt \
-  -v "$PWD/tls":/tls:ro -p 127.0.0.1:8443:8443 holdfast/keystone:dev
+  -v "$PWD/tls":/tls:ro -p 127.0.0.1:8443:8443 steadholme/keystone:dev
 # 带客户端证书 -> 200 ok；不带 -> TLS 握手被拒（certificate required）
 curl --cacert tls/ca.crt --cert tls/client.crt --key tls/client.key \
   --resolve keystone:8443:127.0.0.1 https://keystone:8443/healthz
