@@ -834,7 +834,7 @@ fn render_totp_login(
 }
 
 fn render_totp_enroll(csrf: &str, email: &str, secret: &str, error: Option<&str>) -> String {
-    let uri = totp::otpauth_uri("HOLDFAST", email, secret);
+    let uri = totp::otpauth_uri("Steadholme", email, secret);
     let qr = totp::qr_svg(&uri).unwrap_or_else(|| {
         format!(
             r#"<div class="qr-fallback"><code>{}</code></div>"#,

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HOLDFAST — Keystone sign-in design system · Odyssey 1.1 adapter
+   Steadholme — Keystone sign-in design system · Odyssey 1.1 adapter
    Enterprise IdP surface (Okta/Auth0/Ping-class). Server-rendered, embedded.
    Tokens first, then primitives (buttons/inputs/cards/chips/alerts), then the
    two layouts: .page-auth (split-screen sign-in) and .page-console (/account).

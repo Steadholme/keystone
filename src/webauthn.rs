@@ -18,7 +18,7 @@ pub fn build(rp_id: &str, rp_origin: &str) -> Result<Webauthn, String> {
     let builder = WebauthnBuilder::new(rp_id, &origin)
         .map_err(|e| format!("webauthn rp_id {rp_id:?} / origin {rp_origin:?} mismatch: {e}"))?;
     builder
-        .rp_name("HOLDFAST Keystone")
+        .rp_name("Steadholme Keystone")
         .build()
         .map_err(|e| format!("webauthn build: {e}"))
 }

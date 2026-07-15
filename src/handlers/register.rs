@@ -149,7 +149,7 @@ pub async fn register_submit(
             let link = format!("{}/verify?token={}", state.config.public_issuer, token);
             state.email.send(
                 email,
-                "Verify your HOLDFAST account",
+                "Verify your Steadholme account",
                 &verify_email_body(&link),
             );
             state.audit.emit(AuditEvent::info(
@@ -210,7 +210,7 @@ pub async fn verify(State(state): State<AppState>, Query(q): Query<TokenQuery>) 
             notice(
                 StatusCode::OK,
                 "Email verified",
-                "Your email is confirmed. You can now sign in to HOLDFAST.",
+                "Your email is confirmed. You can now sign in to Steadholme.",
                 "/login",
                 "Continue to sign in",
             )
@@ -263,7 +263,7 @@ pub async fn forgot_submit(
                     let link = format!("{}/reset?token={}", state.config.public_issuer, token);
                     state.email.send(
                         email,
-                        "Reset your HOLDFAST password",
+                        "Reset your Steadholme password",
                         &reset_email_body(&link),
                     );
                     state.audit.emit(AuditEvent::info(
@@ -495,14 +495,14 @@ fn invalid_link_notice() -> Response {
 
 fn verify_email_body(link: &str) -> String {
     format!(
-        "Welcome to HOLDFAST.\n\nConfirm your email address to activate your account:\n\n{link}\n\n\
+        "Welcome to Steadholme.\n\nConfirm your email address to activate your account:\n\n{link}\n\n\
          This link expires in 24 hours. If you did not create this account, you can ignore this message."
     )
 }
 
 fn reset_email_body(link: &str) -> String {
     format!(
-        "We received a request to reset your HOLDFAST password.\n\nReset it here:\n\n{link}\n\n\
+        "We received a request to reset your Steadholme password.\n\nReset it here:\n\n{link}\n\n\
          This link expires in 1 hour. If you did not request this, you can safely ignore this message."
     )
 }
