@@ -6,10 +6,8 @@
 //! verifies PKCE S256, then signs and returns the RS256 access + id tokens.
 
 use axum::extract::State;
-use axum::http::{header, HeaderMap};
+use axum::http::HeaderMap;
 use axum::{Form, Json};
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 use crate::audit::AuditEvent;
@@ -56,7 +54,7 @@ pub async fn token(
     // The client_id may arrive in the form body (public PKCE / client_secret_post) or
     // in the HTTP Basic header (client_secret_basic). Resolve ONE effective client_id;
     // if both are present they MUST agree.
-    let basic = parse_basic_auth(&headers);
+    let basic = auth::parse_basic_auth(&headers);
     let effective_client_id = match (
         params.client_id.as_deref(),
         basic.as_ref().map(|(id, _)| id.as_str()),
@@ -69,7 +67,9 @@ pub async fn token(
         (Some(form_id), _) => form_id.to_string(),
         (None, Some(basic_id)) => basic_id.to_string(),
         (None, None) => {
-            return Err(AppError::InvalidRequest("client_id is required".to_string()));
+            return Err(AppError::InvalidRequest(
+                "client_id is required".to_string(),
+            ));
         }
     };
 
@@ -177,18 +177,4 @@ pub async fn token(
         expires_in: state.config.access_ttl,
         scope: auth_code.scope,
     }))
-}
-
-/// Parse `Authorization: Basic base64(client_id:client_secret)` into its parts.
-/// Returns `None` when the header is absent or not a well-formed Basic credential.
-fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let (scheme, encoded) = value.split_once(' ')?;
-    if !scheme.eq_ignore_ascii_case("Basic") {
-        return None;
-    }
-    let decoded = BASE64_STANDARD.decode(encoded.trim()).ok()?;
-    let decoded = String::from_utf8(decoded).ok()?;
-    let (id, secret) = decoded.split_once(':')?;
-    Some((id.to_string(), secret.to_string()))
 }

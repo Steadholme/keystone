@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod authorize;
 pub mod discovery;
+pub mod introspect;
 pub mod login;
 pub mod register;
 pub mod static_assets;

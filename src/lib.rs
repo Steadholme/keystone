@@ -22,6 +22,7 @@ pub mod webauthn;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use webauthn_rs::Webauthn;
@@ -68,6 +69,16 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/token", post(handlers::token::token))
         .route("/userinfo", get(handlers::userinfo::userinfo))
+        .route(
+            "/internal/v1/pats/introspect",
+            post(handlers::introspect::introspect)
+                .layer(DefaultBodyLimit::max(
+                    handlers::introspect::MAX_INTROSPECTION_FORM_LEN,
+                ))
+                .layer(axum::middleware::from_fn(
+                    handlers::introspect::privacy_headers,
+                )),
+        )
         // --- Login surface ---
         .route("/", get(handlers::login::root_redirect))
         .route(

@@ -56,7 +56,7 @@ curl -s http://127.0.0.1:8080/jwks.json | jq .
 | `SESSION_SECRET` | `__Host-session` cookie 的 HMAC-SHA256 签名密钥；**生产必须覆盖** | dev 默认串（须替换） |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 启动时一次性为种子管理员（`u_admin`）设置 Argon2 密码哈希（仅当其尚无哈希时）。**永不写日志**；幂等（已有哈希则忽略） | 无（不设密码） |
 | `GW_CLIENT_ID` | 机密网关客户端 id（Sluice 作为带 secret 的 OIDC RP） | `sluice-gw` |
-| `GW_CLIENT_SECRET` | 机密网关客户端密钥。**设置时**才会播种该客户端（Argon2id 哈希入库，幂等 UPSERT）；不设置则不播种（默认） | 无 |
+| `GW_CLIENT_SECRET` | 机密网关客户端密钥。**设置时**才会播种该客户端（Argon2id 哈希入库，幂等 UPSERT），并启用仅供该网关调用的 PAT introspection；不设置时 introspection fail closed 为 `503` | 无 |
 | `GW_REDIRECT_URI` | 网关客户端回调地址 | `https://id.w33d.xyz/_gw/auth/callback` |
 | `INTERNAL_TLS` | 内部 mTLS 开关，`on` 启用（其余/未设 = 关闭，行为不变） | 关闭 |
 | `INTERNAL_TLS_ADDR` | mTLS 监听地址（`INTERNAL_TLS=on` 时） | `0.0.0.0:8443` |
@@ -140,6 +140,7 @@ docker run --rm -p 8080:8080 \
 | GET | `/authorize` | `authorization_code` + PKCE(S256)；**校验会话**：无会话 302 跳 `/login`，有会话签码并回跳 |
 | POST | `/token` | 消费单次授权码，校验 PKCE 与绑定，返回 access/id token |
 | GET | `/userinfo` | `Authorization: Bearer <access_token>`，返回 `{sub, email}` |
+| POST | `/internal/v1/pats/introspect` | 内部 PAT introspection；HTTP Basic 网关认证 + form `token`，返回权威 active 状态 |
 | GET·POST | `/login` | 服务端渲染登录页（passkey 按钮 + 用户名/密码表单）；POST 校验 CSRF + Argon2 后建会话 |
 | GET | `/account` | 需会话：显示当前用户 + “注册 passkey” + 登出 |
 | POST | `/logout` | 校验 CSRF，销毁会话并清 cookie |
@@ -178,6 +179,32 @@ docker run --rm -p 8080:8080 \
 机密网关客户端（Sluice 作为带 secret 的 OIDC RP）从环境变量**幂等播种**：设置 `GW_CLIENT_SECRET` 后，于启动时把密钥 Argon2id 哈希并 UPSERT（`GW_CLIENT_ID` 默认 `sluice-gw`、`GW_REDIRECT_URI` 默认 `https://id.w33d.xyz/_gw/auth/callback`，scope = openid/email/profile）。`id_token` 的 `aud` = 请求方 `client_id`、`nonce`（若 `/authorize` 带上）原样回传，供 RP 校验。
 
 > 提示：HTTP Basic 中 `client_id:secret` 按 base64 编码；为避免 RFC 6749 §2.3.1 的表单编码歧义，`GW_CLIENT_SECRET` 建议使用 **URL-safe**（不含 `:` / `/` / `+` 等）的强随机串。
+
+### PAT introspection（内部服务契约）
+
+`POST /internal/v1/pats/introspect` 供 Sluice 使用同一组 `GW_CLIENT_ID` / `GW_CLIENT_SECRET`
+查询 opaque PAT 的权威状态。生产应只经 Keystone 的内部 mTLS listener 调用；PAT 明文只允许出现在
+`application/x-www-form-urlencoded` body 中，禁止放入 URL、query 或日志。
+
+```text
+Authorization: Basic base64(GW_CLIENT_ID:GW_CLIENT_SECRET)
+Content-Type: application/x-www-form-urlencoded
+
+token=pat_<base64url-no-pad>
+```
+
+- token 总长度上限为 `128` bytes；前缀必须精确为小写 `pat_`，payload 仅允许
+  `[A-Za-z0-9_-]+`。当前签发格式固定为 `pat_` + 43 字符 payload（总长 47）。
+- active 响应：`200 {"active":true,"sub":"…","scope":"…","exp":…,"token_type":"Bearer"}`。
+  `scope` 是空格分隔字符串，调用方必须做完整 token membership，不得做子串匹配。
+- 无效、未知、已撤销、已过期，或 owner 已 disabled / 不存在时统一返回
+  `200 {"active":false}`，不泄漏失效原因。
+- Basic 缺失或错误返回 `401 invalid_client`；`GW_CLIENT_SECRET` 未配置或 Store/数据库故障返回
+  `503 temporarily_unavailable`，不得降级为 inactive 或使用 stale authority。
+- 所有响应（包括 body-limit / extractor 的 `4xx`）均带
+  `Cache-Control: private, no-store` 与 `Vary: Authorization`。
+- Keystone 只持久化 PAT 的 SHA-256 hash；introspection 按 hash 查询，并同时强制
+  `revoked_at = 0`、`expires_at > now`、`users.disabled = false`。响应和日志均不包含 token/hash。
 
 ## 内部 mTLS（keystone↔sluice，env 开关，默认关闭）
 

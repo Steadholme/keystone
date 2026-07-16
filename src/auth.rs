@@ -9,10 +9,10 @@ use argon2::password_hash::rand_core::OsRng as PwOsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use axum::http::{header, HeaderMap};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::store::{new_opaque_code, Session};
 use crate::{now_secs, AppState};
@@ -178,13 +178,15 @@ pub fn header_csrf(headers: &HeaderMap) -> Option<String> {
 /// Double-submit check: the `submitted` token must equal the `__Host-csrf` cookie.
 pub fn verify_csrf(headers: &HeaderMap, submitted: &str) -> bool {
     match get_cookie(headers, CSRF_COOKIE) {
-        Some(cookie) if !cookie.is_empty() => ct_eq(cookie.as_bytes(), submitted.as_bytes()),
+        Some(cookie) if !cookie.is_empty() => {
+            constant_time_eq(cookie.as_bytes(), submitted.as_bytes())
+        }
         _ => false,
     }
 }
 
 /// Length-checked constant-time byte comparison.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -193,6 +195,37 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
+}
+
+/// Parse one `Authorization: Basic base64(client_id:client_secret)` credential.
+/// Missing, repeated, non-Basic, oversized, or malformed headers are rejected.
+pub fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
+    let mut values = headers.get_all(header::AUTHORIZATION).iter();
+    let value = values.next()?.to_str().ok()?;
+    if values.next().is_some() || value.len() > 1024 {
+        return None;
+    }
+    let (scheme, encoded) = value.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("Basic") {
+        return None;
+    }
+    let decoded = BASE64_STANDARD.decode(encoded.trim()).ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    let (id, secret) = decoded.split_once(':')?;
+    Some((id.to_string(), secret.to_string()))
+}
+
+/// SHA-256 hash used for opaque, high-entropy server-side secrets such as PATs and
+/// recovery codes. The returned lowercase hex string is safe to persist; callers must
+/// never log either the plaintext or this hash.
+pub fn secret_hash(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write as _;
+        write!(&mut out, "{b:02x}").expect("writing to String cannot fail");
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

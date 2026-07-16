@@ -48,6 +48,7 @@ async fn pg_store_full_integration() {
         .await
         .expect("connect to TEST_DATABASE_URL");
     pg.migrate().await.expect("migrate");
+    pg.migrate().await.expect("migrate is idempotent");
     pg.seed(&seed_client(), &seed_user()).await.expect("seed");
     // Seeding twice MUST be idempotent (UPSERT) — no error, no duplicate rows.
     pg.seed(&seed_client(), &seed_user())
@@ -275,23 +276,111 @@ async fn pg_store_full_integration() {
         })
         .await;
     assert_eq!(state.store.list_login_events("u_admin", 10).await.len(), 1);
+    let pat_plaintext = format!("pat_{}", new_opaque_code());
+    let pat_hash = keystone::auth::secret_hash(&pat_plaintext);
+    let pat_now = now_secs();
     let pat = PersonalAccessToken {
         id: new_opaque_code(),
         user_sub: "u_admin".to_string(),
         name: "pg token".to_string(),
-        token_hash: "sha256-hash".to_string(),
+        token_hash: pat_hash.clone(),
         scopes: "profile".to_string(),
-        created_at: now_secs(),
-        expires_at: now_secs() + 86400,
+        created_at: pat_now,
+        expires_at: pat_now + 86400,
         revoked_at: 0,
     };
-    state.store.put_personal_token(pat.clone()).await;
-    assert_eq!(state.store.list_personal_tokens("u_admin").await.len(), 1);
     state
         .store
-        .revoke_personal_token("u_admin", &pat.id, now_secs())
-        .await;
-    assert!(state.store.list_personal_tokens("u_admin").await.is_empty());
+        .put_personal_token(pat.clone())
+        .await
+        .expect("persist PAT");
+    assert!(state
+        .store
+        .list_personal_tokens("u_admin")
+        .await
+        .iter()
+        .any(|token| token.id == pat.id));
+    let mut duplicate_hash = pat.clone();
+    duplicate_hash.id = new_opaque_code();
+    duplicate_hash.name = "duplicate hash must fail".to_string();
+    assert_eq!(
+        state.store.put_personal_token(duplicate_hash).await,
+        Err(keystone::store::StoreError::Backend),
+        "duplicate token hash is an explicit persistence failure"
+    );
+    assert_eq!(
+        state
+            .store
+            .list_personal_tokens("u_admin")
+            .await
+            .iter()
+            .filter(|token| token.token_hash == pat_hash)
+            .count(),
+        1,
+        "unique token_hash index rejects ambiguous authority"
+    );
+    assert_eq!(
+        state
+            .store
+            .find_active_personal_token(&pat_hash, pat_now)
+            .await
+            .expect("authoritative PAT lookup")
+            .map(|token| token.id),
+        Some(pat.id.clone())
+    );
+    assert!(state
+        .store
+        .find_active_personal_token("missing-hash", pat_now)
+        .await
+        .expect("authoritative PAT miss")
+        .is_none());
+    state.store.set_disabled("u_admin", true).await;
+    assert!(state
+        .store
+        .find_active_personal_token(&pat_hash, pat_now)
+        .await
+        .expect("disabled owner lookup")
+        .is_none());
+    state.store.set_disabled("u_admin", false).await;
+    state
+        .store
+        .revoke_personal_token("u_admin", &pat.id, pat_now)
+        .await
+        .expect("revoke PAT");
+    assert!(state
+        .store
+        .find_active_personal_token(&pat_hash, pat_now)
+        .await
+        .expect("revoked PAT lookup")
+        .is_none());
+
+    let expired_plaintext = format!("pat_{}", new_opaque_code());
+    let expired = PersonalAccessToken {
+        id: new_opaque_code(),
+        user_sub: "u_admin".to_string(),
+        name: "expired pg token".to_string(),
+        token_hash: keystone::auth::secret_hash(&expired_plaintext),
+        scopes: "profile".to_string(),
+        created_at: pat_now.saturating_sub(60),
+        expires_at: pat_now,
+        revoked_at: 0,
+    };
+    state
+        .store
+        .put_personal_token(expired.clone())
+        .await
+        .expect("persist expired PAT fixture");
+    assert!(state
+        .store
+        .find_active_personal_token(&expired.token_hash, pat_now)
+        .await
+        .expect("expired PAT lookup")
+        .is_none());
+    state
+        .store
+        .revoke_personal_token("u_admin", &expired.id, pat_now)
+        .await
+        .expect("revoke expired PAT fixture");
 
     // webauthn credentials: put -> list -> get -> update passkey.
     let cred = Credential {

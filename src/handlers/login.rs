@@ -8,7 +8,6 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::audit::AuditEvent;
 use crate::auth;
@@ -432,7 +431,7 @@ pub async fn totp_login_submit(
         .store
         .take_recovery_code(
             &user.sub,
-            &secret_hash(&normalize_recovery_code(&form.code)),
+            &auth::secret_hash(&normalize_recovery_code(&form.code)),
         )
         .await
     {
@@ -572,7 +571,7 @@ pub async fn totp_verify(
         .collect();
     let hashes: Vec<String> = codes
         .iter()
-        .map(|c| secret_hash(&normalize_recovery_code(c)))
+        .map(|c| auth::secret_hash(&normalize_recovery_code(c)))
         .collect();
     state
         .store
@@ -679,13 +678,21 @@ pub async fn pat_create(
         id: format!("pat_{}", new_opaque_code()),
         user_sub: user.sub.clone(),
         name: name.clone(),
-        token_hash: secret_hash(&plaintext),
+        token_hash: auth::secret_hash(&plaintext),
         scopes: scopes.clone(),
         created_at: now_secs(),
         expires_at: now_secs() + days * 86400,
         revoked_at: 0,
     };
-    state.store.put_personal_token(token).await;
+    if state.store.put_personal_token(token).await.is_err() {
+        return notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Token unavailable",
+            "We couldn't create this token. No credential was issued; please try again.",
+            "/account",
+            "Back to account",
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "pat.create",
         &user.email,
@@ -714,10 +721,20 @@ pub async fn pat_revoke(
         return redirect("/account", &[]);
     }
     if !form.token_id.is_empty() {
-        state
+        if state
             .store
             .revoke_personal_token(&user.sub, &form.token_id, now_secs())
-            .await;
+            .await
+            .is_err()
+        {
+            return notice(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Token revocation unavailable",
+                "We couldn't confirm this revocation. The token may still be active; please try again.",
+                "/account",
+                "Back to account",
+            );
+        }
         state.audit.emit(AuditEvent::info(
             "pat.revoke",
             &user.email,
@@ -1198,17 +1215,6 @@ pub(crate) async fn record_login_event(
         .await;
 }
 
-fn secret_hash(value: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(value.as_bytes());
-    let digest = h.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for b in digest {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
-}
-
 fn normalize_recovery_code(raw: &str) -> String {
     raw.chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -1286,5 +1292,142 @@ fn attach_cookies(resp: &mut Response, cookies: &[String]) {
         if let Ok(v) = HeaderValue::from_str(c) {
             resp.headers_mut().append(header::SET_COOKIE, v);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::config;
+    use crate::store::{InMemoryStore, Store};
+
+    const TEST_PASSWORD: &str = "handler-failure-password";
+
+    async fn state_with_faultable_store() -> (AppState, Arc<InMemoryStore>, String) {
+        let mut state = crate::build_dev_state();
+        let store = Arc::new(InMemoryStore::new());
+        store.seed_client(config::seed_client());
+        store.put_user(config::seed_user());
+        store
+            .set_password_hash(
+                config::SEED_USER_SUB,
+                &auth::hash_password(TEST_PASSWORD).expect("hash test password"),
+            )
+            .await;
+        state.store = store.clone();
+        let session = auth::create_session(
+            &state,
+            config::SEED_USER_SUB,
+            "pat-failure-test",
+            "127.0.0.1",
+        )
+        .await;
+        (state, store, session)
+    }
+
+    async fn post_account_form(
+        state: &AppState,
+        session: &str,
+        path: &str,
+        body: String,
+    ) -> Response {
+        let request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(
+                header::COOKIE,
+                format!("__Host-session={session}; __Host-csrf=test-csrf"),
+            )
+            .body(Body::from(body))
+            .expect("build PAT handler request");
+        crate::app(state.clone())
+            .oneshot(request)
+            .await
+            .expect("call PAT handler")
+    }
+
+    async fn response_body(response: Response) -> String {
+        String::from_utf8_lossy(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("read PAT handler response"),
+        )
+        .into_owned()
+    }
+
+    #[tokio::test]
+    async fn pat_create_store_failure_is_503_without_plaintext() {
+        let (state, store, session) = state_with_faultable_store().await;
+        store.set_personal_token_write_failures(true, false);
+
+        let response = post_account_form(
+            &state,
+            &session,
+            "/account/tokens/create",
+            format!(
+                "csrf_token=test-csrf&name=deploy&scopes=corvid%3Atemp-mail%3Adelete&expiry_days=30&current_password={TEST_PASSWORD}"
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response_body(response).await;
+        assert!(body.contains("No credential was issued"));
+        assert!(
+            !body.contains("pat_"),
+            "failed creation must not reveal a PAT"
+        );
+        assert!(store
+            .list_personal_tokens(config::SEED_USER_SUB)
+            .await
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn pat_revoke_store_failure_is_503_and_token_stays_active() {
+        let (state, store, session) = state_with_faultable_store().await;
+        let plaintext = "pat_handler_failure_fixture";
+        let token = PersonalAccessToken {
+            id: "pat_record_for_revoke_failure".to_string(),
+            user_sub: config::SEED_USER_SUB.to_string(),
+            name: "revoke failure".to_string(),
+            token_hash: auth::secret_hash(plaintext),
+            scopes: "corvid:temp-mail:delete".to_string(),
+            created_at: now_secs(),
+            expires_at: now_secs() + 300,
+            revoked_at: 0,
+        };
+        store
+            .put_personal_token(token.clone())
+            .await
+            .expect("store revocation fixture");
+        store.set_personal_token_write_failures(false, true);
+
+        let response = post_account_form(
+            &state,
+            &session,
+            "/account/tokens/revoke",
+            format!("csrf_token=test-csrf&token_id={}", token.id),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response_body(response).await;
+        assert!(body.contains("may still be active"));
+        assert!(!body.contains(plaintext));
+        assert!(!body.contains(&token.id));
+        assert!(!body.contains(&token.token_hash));
+
+        let persisted = store
+            .find_active_personal_token(&token.token_hash, now_secs())
+            .await
+            .expect("authoritative lookup after failed revocation")
+            .expect("token remains active after failed revocation");
+        assert_eq!(persisted.id, token.id);
     }
 }

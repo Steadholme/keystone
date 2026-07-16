@@ -10,6 +10,8 @@
 //! same portable-SQL discipline as the v0 OAuth tables.
 
 use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -93,6 +95,13 @@ pub enum CreateUserError {
     /// The email is already registered.
     EmailTaken,
     /// A storage backend failure (logged at the store layer).
+    Backend,
+}
+
+/// Failure to obtain or persist authoritative state in the configured storage backend.
+/// Callers must fail closed instead of treating this as a missing record or success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreError {
     Backend,
 }
 
@@ -299,12 +308,27 @@ pub trait Store: Send + Sync {
     /// Newest login events for a user, bounded by `limit`.
     async fn list_login_events(&self, user_sub: &str, limit: usize) -> Vec<LoginEvent>;
 
-    /// Store a hashed personal access token.
-    async fn put_personal_token(&self, token: PersonalAccessToken);
+    /// Store a hashed personal access token. A backend failure is returned so the
+    /// caller never reveals plaintext for a token that was not durably persisted.
+    async fn put_personal_token(&self, token: PersonalAccessToken) -> Result<(), StoreError>;
     /// Tokens for a user, newest first. Revoked tokens are not returned.
     async fn list_personal_tokens(&self, user_sub: &str) -> Vec<PersonalAccessToken>;
-    /// Revoke one token only if it belongs to `user_sub`.
-    async fn revoke_personal_token(&self, user_sub: &str, id: &str, revoked_at: u64);
+    /// Resolve one currently active PAT by its SHA-256 hash. This is an authoritative
+    /// lookup: revoked/expired tokens and tokens owned by disabled/missing users return
+    /// `Ok(None)`, while a backend failure returns `Err` and must fail closed.
+    async fn find_active_personal_token(
+        &self,
+        token_hash: &str,
+        now: u64,
+    ) -> Result<Option<PersonalAccessToken>, StoreError>;
+    /// Revoke one token only if it belongs to `user_sub`. A backend failure is
+    /// authoritative and must not be presented to the user as a successful revocation.
+    async fn revoke_personal_token(
+        &self,
+        user_sub: &str,
+        id: &str,
+        revoked_at: u64,
+    ) -> Result<(), StoreError>;
 
     async fn put_state(&self, state: WebauthnState);
     /// Atomically remove and return ceremony state (single-use); `None` if absent.
@@ -324,6 +348,10 @@ pub struct InMemoryStore {
     totp_challenges: Mutex<HashMap<String, TotpChallenge>>,
     login_events: Mutex<Vec<LoginEvent>>,
     personal_tokens: Mutex<HashMap<String, PersonalAccessToken>>,
+    #[cfg(test)]
+    fail_personal_token_put: AtomicBool,
+    #[cfg(test)]
+    fail_personal_token_revoke: AtomicBool,
     states: Mutex<HashMap<String, WebauthnState>>,
     verification_tokens: Mutex<HashMap<String, VerificationToken>>,
     /// Consent record keyed by `(user_sub, client_id)` -> (granted scope, granted_at).
@@ -351,6 +379,15 @@ impl InMemoryStore {
             .lock()
             .expect("clients lock poisoned")
             .insert(client.client_id.clone(), client);
+    }
+
+    /// Unit-test fault injection for the PAT persistence boundary. These switches do
+    /// not exist in production builds and let handler tests prove fail-closed responses.
+    #[cfg(test)]
+    pub(crate) fn set_personal_token_write_failures(&self, put: bool, revoke: bool) {
+        self.fail_personal_token_put.store(put, Ordering::SeqCst);
+        self.fail_personal_token_revoke
+            .store(revoke, Ordering::SeqCst);
     }
 }
 
@@ -716,11 +753,16 @@ impl Store for InMemoryStore {
         v
     }
 
-    async fn put_personal_token(&self, token: PersonalAccessToken) {
+    async fn put_personal_token(&self, token: PersonalAccessToken) -> Result<(), StoreError> {
+        #[cfg(test)]
+        if self.fail_personal_token_put.load(Ordering::SeqCst) {
+            return Err(StoreError::Backend);
+        }
         self.personal_tokens
             .lock()
             .expect("personal_tokens lock poisoned")
             .insert(token.id.clone(), token);
+        Ok(())
     }
 
     async fn list_personal_tokens(&self, user_sub: &str) -> Vec<PersonalAccessToken> {
@@ -736,7 +778,42 @@ impl Store for InMemoryStore {
         v
     }
 
-    async fn revoke_personal_token(&self, user_sub: &str, id: &str, revoked_at: u64) {
+    async fn find_active_personal_token(
+        &self,
+        token_hash: &str,
+        now: u64,
+    ) -> Result<Option<PersonalAccessToken>, StoreError> {
+        let token = self
+            .personal_tokens
+            .lock()
+            .expect("personal_tokens lock poisoned")
+            .values()
+            .find(|token| {
+                token.token_hash == token_hash && token.revoked_at == 0 && token.expires_at > now
+            })
+            .cloned();
+        let Some(token) = token else {
+            return Ok(None);
+        };
+        let enabled_owner = self
+            .users
+            .lock()
+            .expect("users lock poisoned")
+            .get(&token.user_sub)
+            .is_some_and(|user| !user.disabled);
+        Ok(enabled_owner.then_some(token))
+    }
+
+    async fn revoke_personal_token(
+        &self,
+        user_sub: &str,
+        id: &str,
+        revoked_at: u64,
+    ) -> Result<(), StoreError> {
+        #[cfg(test)]
+        if self.fail_personal_token_revoke.load(Ordering::SeqCst) {
+            return Err(StoreError::Backend);
+        }
         if let Some(token) = self
             .personal_tokens
             .lock()
@@ -747,6 +824,7 @@ impl Store for InMemoryStore {
                 token.revoked_at = revoked_at;
             }
         }
+        Ok(())
     }
 
     async fn put_state(&self, state: WebauthnState) {
@@ -1000,6 +1078,14 @@ impl PgStore {
                  expires_at BIGINT NOT NULL, \
                  revoked_at BIGINT NOT NULL DEFAULT 0\
              )",
+        )
+        .execute(&self.pool)
+        .await?;
+        // PAT plaintext is never persisted. Its SHA-256 lookup key must identify at most
+        // one row so introspection cannot produce ambiguous authority.
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS personal_access_tokens_token_hash_uq \
+             ON personal_access_tokens (token_hash)",
         )
         .execute(&self.pool)
         .await?;
@@ -1844,6 +1930,27 @@ impl PgStore {
         rows.iter().map(Self::personal_token_from_row).collect()
     }
 
+    async fn find_active_personal_token_async(
+        &self,
+        token_hash: &str,
+        now: u64,
+    ) -> Result<Option<PersonalAccessToken>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT p.id, p.user_sub, p.name, p.token_hash, p.scopes, p.created_at, \
+                    p.expires_at, p.revoked_at \
+             FROM personal_access_tokens p \
+             JOIN users u ON u.sub = p.user_sub \
+             WHERE p.token_hash = $1 AND p.revoked_at = 0 AND p.expires_at > $2 \
+                   AND u.disabled = false \
+             LIMIT 1",
+        )
+        .bind(token_hash)
+        .bind(now as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(Self::personal_token_from_row).transpose()
+    }
+
     async fn revoke_personal_token_async(
         &self,
         user_sub: &str,
@@ -2185,10 +2292,13 @@ impl Store for PgStore {
             })
     }
 
-    async fn put_personal_token(&self, token: PersonalAccessToken) {
-        if let Err(e) = self.put_personal_token_async(&token).await {
-            tracing::error!(error = %e, "pg put_personal_token failed");
-        }
+    async fn put_personal_token(&self, token: PersonalAccessToken) -> Result<(), StoreError> {
+        self.put_personal_token_async(&token).await.map_err(|_| {
+            // Database constraint details can echo token_hash values. Keep this log
+            // deliberately generic so neither PAT plaintext nor its hash is disclosed.
+            tracing::error!("pg put_personal_token failed");
+            StoreError::Backend
+        })
     }
 
     async fn list_personal_tokens(&self, user_sub: &str) -> Vec<PersonalAccessToken> {
@@ -2200,13 +2310,28 @@ impl Store for PgStore {
             })
     }
 
-    async fn revoke_personal_token(&self, user_sub: &str, id: &str, revoked_at: u64) {
-        if let Err(e) = self
-            .revoke_personal_token_async(user_sub, id, revoked_at)
+    async fn find_active_personal_token(
+        &self,
+        token_hash: &str,
+        now: u64,
+    ) -> Result<Option<PersonalAccessToken>, StoreError> {
+        self.find_active_personal_token_async(token_hash, now)
             .await
-        {
-            tracing::error!(error = %e, "pg revoke_personal_token failed");
-        }
+            .map_err(|_| StoreError::Backend)
+    }
+
+    async fn revoke_personal_token(
+        &self,
+        user_sub: &str,
+        id: &str,
+        revoked_at: u64,
+    ) -> Result<(), StoreError> {
+        self.revoke_personal_token_async(user_sub, id, revoked_at)
+            .await
+            .map_err(|_| {
+                tracing::error!("pg revoke_personal_token failed");
+                StoreError::Backend
+            })
     }
 
     async fn put_state(&self, state: WebauthnState) {
