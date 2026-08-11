@@ -46,7 +46,8 @@ fn authorize_uri(challenge: &str, method: &str) -> String {
 /// gates on one) and return the issued (code, state).
 async fn authorize_ok(state: &AppState) -> (String, String) {
     // Establish a session for the seeded admin and carry its signed cookie.
-    let session_cookie = keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session_cookie =
+        keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
     let req = Request::builder()
         .uri(authorize_uri(CHALLENGE, "S256"))
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))

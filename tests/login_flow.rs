@@ -404,6 +404,10 @@ async fn totp_enrollment_requires_second_factor_after_password() {
     assert!(body_str(&body).contains("Recovery codes"));
     let enabled = state.store.get_totp("u_admin").await.unwrap();
     assert!(enabled.enabled, "totp enabled after first verified code");
+    assert!(
+        enabled.last_accepted_counter.is_some(),
+        "enrollment counter is persisted as the replay floor"
+    );
     assert_eq!(state.store.recovery_code_count("u_admin").await, 10);
 
     // Password alone no longer creates a session; it renders the TOTP challenge.
@@ -427,11 +431,17 @@ async fn totp_enrollment_requires_second_factor_after_password() {
     );
     let html = body_str(&body);
     assert!(html.contains("Two-step verification"));
+    // Ordinary two-step login (no strong ACR) may be completed with a recovery code, so the
+    // copy offers that path.
+    assert!(html.contains("or a recovery code"));
+    assert!(html.contains("recovery codes"));
     let challenge_id = hidden_value(&html, "challenge_id");
 
     // The TOTP code completes login and yields the normal session cookie.
     let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
-    let code = keystone::totp::code_at(&enabled.secret, keystone::now_secs()).unwrap();
+    // Use the next counter, which is inside the accepted +1 skew window but has not been
+    // consumed by enrollment. This avoids sleeping while still exercising monotonic advance.
+    let code = keystone::totp::code_at(&enabled.secret, keystone::now_secs() + 30).unwrap();
     let (status, headers, _) = call(
         &state,
         post_form(
@@ -445,6 +455,15 @@ async fn totp_enrollment_requires_second_factor_after_password() {
     assert_eq!(location(&headers), "/account");
     let session = cookie_value(&headers, "__Host-session").expect("session after TOTP");
 
+    let strong_authorize = format!("{}&acr_values=hf-aal-strong", authorize_uri());
+    let (status, headers, _) = call(
+        &state,
+        get_with_cookie(&strong_authorize, &format!("__Host-session={session}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(location(&headers).contains("code="));
+
     let (status, _, body) = call(
         &state,
         get_with_cookie("/account", &format!("__Host-session={session}")),
@@ -456,6 +475,37 @@ async fn totp_enrollment_requires_second_factor_after_password() {
     assert!(html.contains("Login history"));
     assert!(html.contains("totp"));
     assert!(html.contains("success"));
+
+    // A fresh password challenge cannot reuse the exact TOTP counter that just minted the
+    // strong session, even though it remains inside the accepted ±1 time window.
+    let (_, headers, _) = call(&state, get("/login")).await;
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, headers, body) = call(
+        &state,
+        post_form(
+            "/login",
+            Some(&format!("__Host-csrf={csrf}")),
+            format!(
+                "username=admin@steadholme.local&password={PASSWORD}&csrf_token={csrf}&return_to=%2Faccount"
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let challenge_id = hidden_value(&body_str(&body), "challenge_id");
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let (status, headers, body) = call(
+        &state,
+        post_form(
+            "/login/totp",
+            Some(&format!("__Host-csrf={csrf}")),
+            format!("csrf_token={csrf}&challenge_id={challenge_id}&code={code}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(cookie_value(&headers, "__Host-session").is_none());
+    assert!(body_str(&body).contains("Incorrect verification code"));
 }
 
 #[tokio::test]

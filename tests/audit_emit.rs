@@ -72,7 +72,11 @@ async fn login_failure_is_prompt_with_unreachable_audit_sink() {
     let elapsed = started.elapsed();
 
     // The handler returned the normal failure response — emission did not error it.
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "bad password is still 401");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "bad password is still 401"
+    );
     assert!(
         cookie_value(&headers, "__Host-session").is_none(),
         "no session granted on failure"

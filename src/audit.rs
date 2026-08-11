@@ -192,9 +192,8 @@ async fn post(target: &Target, token: &str, body: &str) -> std::io::Result<u16> 
     // `Connection: close` bounds the read; the response is small (a sealed event JSON).
     let mut buf = Vec::with_capacity(256);
     stream.read_to_end(&mut buf).await?;
-    parse_status(&buf).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "no HTTP status line")
-    })
+    parse_status(&buf)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "no HTTP status line"))
 }
 
 /// Parse the numeric status from an HTTP response's first line (`HTTP/1.1 200 OK`).
@@ -306,7 +305,10 @@ mod tests {
 
         // Whatever password the user typed, it is not present anywhere in the payload.
         for secret in ["hunter2bravo", "wrongpass", "correct horse battery staple"] {
-            assert!(!json.contains(secret), "password must never appear: {secret}");
+            assert!(
+                !json.contains(secret),
+                "password must never appear: {secret}"
+            );
         }
     }
 

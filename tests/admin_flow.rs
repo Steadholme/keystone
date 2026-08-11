@@ -74,10 +74,19 @@ async fn setup() -> AppState {
     let hash = keystone::auth::hash_password(USER_PASSWORD).unwrap();
     state
         .store
-        .create_user("u_member", "member@steadholme.local", &hash, keystone::now_secs())
+        .create_user(
+            "u_member",
+            "member@steadholme.local",
+            &hash,
+            keystone::now_secs(),
+        )
         .await
         .unwrap();
-    state.store.set_email_verified("u_member").await;
+    state
+        .store
+        .set_email_verified("u_member")
+        .await
+        .expect("verify member");
     state
 }
 
@@ -88,7 +97,11 @@ async fn session_cookie(state: &AppState, sub: &str) -> String {
 }
 
 /// Full password login; returns `(status, headers, body)` of the `POST /login`.
-async fn login(state: &AppState, username: &str, password: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
+async fn login(
+    state: &AppState,
+    username: &str,
+    password: &str,
+) -> (StatusCode, HeaderMap, Vec<u8>) {
     let (_, headers, _) = call(state, get("/login")).await;
     let csrf = cookie_value(&headers, "__Host-csrf").expect("csrf cookie issued");
     let body =
@@ -117,7 +130,10 @@ async fn admin_action(
         .method("POST")
         .uri(action)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .header(header::COOKIE, format!("{admin_cookie}; __Host-csrf={csrf}"))
+        .header(
+            header::COOKIE,
+            format!("{admin_cookie}; __Host-csrf={csrf}"),
+        )
         .body(Body::from(format!("csrf_token={csrf}&sub={sub}")))
         .unwrap();
     call(state, req).await
@@ -144,8 +160,14 @@ async fn admin_page_is_session_and_admin_gated() {
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8_lossy(&body);
     assert!(html.contains("u_admin"), "user table lists the admin");
-    assert!(html.contains("member@steadholme.local"), "user table lists members");
-    assert!(html.contains("sluice-dev"), "clients table lists the seeded client");
+    assert!(
+        html.contains("member@steadholme.local"),
+        "user table lists members"
+    );
+    assert!(
+        html.contains("sluice-dev"),
+        "clients table lists the seeded client"
+    );
     assert!(
         html.contains("http://127.0.0.1:9090/callback"),
         "clients table shows redirect URIs"
@@ -194,14 +216,22 @@ async fn disable_blocks_login_before_password_and_enable_restores() {
     // ...and identically with a WRONG password (the gate runs before the password check,
     // so the response cannot leak whether the password was correct).
     let (status, _, body) = login(&state, "member@steadholme.local", "totally-wrong").await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "same outcome regardless of password");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "same outcome regardless of password"
+    );
     assert!(String::from_utf8_lossy(&body).contains("disabled"));
 
     // Enable restores login.
     let (status, _, _) = admin_action(&state, &admin, "/admin/users/enable", "u_member").await;
     assert_eq!(status, StatusCode::FOUND);
     let (status, _, _) = login(&state, "member@steadholme.local", USER_PASSWORD).await;
-    assert_eq!(status, StatusCode::FOUND, "member logs in again after enable");
+    assert_eq!(
+        status,
+        StatusCode::FOUND,
+        "member logs in again after enable"
+    );
 }
 
 #[tokio::test]
@@ -233,7 +263,10 @@ async fn forced_reset_link_completes_a_real_password_reset() {
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8_lossy(&body).to_string();
     let marker = "/reset?token=";
-    let start = html.find(marker).expect("reset link displayed to the admin") + marker.len();
+    let start = html
+        .find(marker)
+        .expect("reset link displayed to the admin")
+        + marker.len();
     let token: String = html[start..]
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
@@ -333,7 +366,11 @@ async fn toggle_admin_grants_console_access() {
         admin_action(&state, &admin, "/admin/users/toggle-admin", "u_member").await;
     assert_eq!(status, StatusCode::FOUND);
     let (status, _, _) = call(&state, get_with_cookie("/admin", &member)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "revoked admin is locked out again");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked admin is locked out again"
+    );
 }
 
 #[tokio::test]

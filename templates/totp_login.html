@@ -34,7 +34,7 @@
       <div class="auth-card">
         <header class="auth-card__head">
           <h1 class="auth-card__title">Two-step verification</h1>
-          <p class="auth-card__sub">Enter an authenticator code or recovery code.</p>
+          <p class="auth-card__sub">{{SUBTITLE}}</p>
         </header>
         <div class="alert-area" role="alert" aria-live="assertive">{{ERROR}}</div>
         <form class="auth-form" method="post" action="/login/totp">
@@ -42,9 +42,11 @@
           <input type="hidden" name="challenge_id" value="{{CHALLENGE_ID}}">
           <input type="hidden" name="return_to" value="{{RETURN_TO}}">
           <div class="field">
-            <label for="code">Verification code</label>
-            <input id="code" name="code" type="text" inputmode="numeric"
-                   autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required>
+            <label for="code">{{CODE_LABEL}}</label>
+            <input id="code" name="code" type="text" inputmode="{{CODE_INPUTMODE}}"
+                   autocomplete="one-time-code" autocapitalize="none" spellcheck="false"
+                   aria-describedby="code-hint" required>
+            <p class="field__hint" id="code-hint">{{CODE_HINT}}</p>
           </div>
           <button type="submit" class="btn btn-primary btn-block">Verify</button>
         </form>

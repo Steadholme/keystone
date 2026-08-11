@@ -300,6 +300,17 @@ input[type="email"]:focus {
 .status:empty { margin-top: 0; }
 .status.ok { color: var(--success); }
 .status.err { color: var(--danger); }
+/* Neutral, non-alarming callout (e.g. the step-up notice on the login page). Not a live
+   region — it is server-rendered context, distinct from the danger-toned .alert. */
+.auth-note {
+  margin: 0 0 var(--sp-5);
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  background: var(--accent-soft);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
 
 /* ==========================================================================
    Cards + chips (shared)

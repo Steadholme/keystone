@@ -30,18 +30,25 @@ pub fn code_at(secret: &str, now: u64) -> Option<String> {
     hotp(secret, now / PERIOD)
 }
 
-/// Verify a submitted code with ±1 time-step skew.
-pub fn verify_code(secret: &str, submitted: &str, now: u64) -> bool {
-    let Some(code) = normalize_code(submitted) else {
-        return false;
-    };
+/// Return the matched RFC 6238 counter for a submitted code with ±1 time-step skew.
+///
+/// Callers that grant authentication authority must persist this counter monotonically
+/// before creating a session. Returning the counter (instead of only a boolean) lets the
+/// store reject replay of the same code across concurrent password challenges.
+pub fn matching_counter(secret: &str, submitted: &str, now: u64) -> Option<u64> {
+    let code = normalize_code(submitted)?;
     let counter = now / PERIOD;
-    for step in counter.saturating_sub(1)..=counter + 1 {
-        if hotp(secret, step).is_some_and(|expected| expected == code) {
-            return true;
-        }
-    }
-    false
+    // Prefer the newest matching step. Six-digit codes can very rarely collide across
+    // adjacent counters; choosing the greatest match preserves the monotonic replay fence.
+    (counter.saturating_sub(1)..=counter.saturating_add(1))
+        .rev()
+        .find(|&step| hotp(secret, step).is_some_and(|expected| expected == code))
+}
+
+/// Boolean compatibility helper for enrollment/UI validation. Authentication paths should
+/// use [`matching_counter`] and atomically advance the store's last-accepted counter.
+pub fn verify_code(secret: &str, submitted: &str, now: u64) -> bool {
+    matching_counter(secret, submitted, now).is_some()
 }
 
 /// Build an authenticator-app otpauth URI.
@@ -170,6 +177,10 @@ mod tests {
         let secret = new_secret();
         let code = code_at(&secret, 1_700_000_000).unwrap();
         assert!(verify_code(&secret, &code, 1_700_000_000));
+        assert_eq!(
+            matching_counter(&secret, &code, 1_700_000_000),
+            Some(1_700_000_000 / PERIOD)
+        );
         assert!(!verify_code(&secret, "000000", 1_700_000_000));
     }
 }

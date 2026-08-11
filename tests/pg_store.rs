@@ -13,17 +13,19 @@
 //! handlers `.await` sqlx natively with no sync-over-async bridge.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use keystone::config::{seed_client, seed_user};
 use keystone::store::{
-    new_opaque_code, AuthCode, Credential, LoginEvent, PersonalAccessToken, PgStore, Session,
-    TotpChallenge, TotpConfig, WebauthnState,
+    new_opaque_code, AssuranceLevel, AuthCode, AuthCodeBinding, Credential, LoginEvent,
+    PersonalAccessToken, PgStore, Session, TotpChallenge, TotpConfig, WebauthnState,
 };
 use keystone::{now_secs, AppState};
 use serde_json::Value;
+use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
 const CLIENT_ID: &str = "sluice-dev";
@@ -47,6 +49,11 @@ async fn pg_store_full_integration() {
     let pg = PgStore::connect(&url)
         .await
         .expect("connect to TEST_DATABASE_URL");
+    let inspection_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("connect inspection pool");
     pg.migrate().await.expect("migrate");
     pg.migrate().await.expect("migrate is idempotent");
     pg.seed(&seed_client(), &seed_user()).await.expect("seed");
@@ -92,9 +99,17 @@ async fn pg_store_full_integration() {
     assert!(!user.disabled, "seeded operator starts enabled");
     // disable/enable + admin-bit round-trips on real Postgres (restored afterwards so
     // the test database stays reusable).
-    state.store.set_disabled("u_admin", true).await;
+    state
+        .store
+        .set_disabled("u_admin", true)
+        .await
+        .expect("disable admin");
     assert!(state.store.get_user("u_admin").await.unwrap().disabled);
-    state.store.set_disabled("u_admin", false).await;
+    state
+        .store
+        .set_disabled("u_admin", false)
+        .await
+        .expect("enable admin");
     assert!(!state.store.get_user("u_admin").await.unwrap().disabled);
     state.store.set_is_admin("u_admin", false).await;
     assert!(!state.store.get_user("u_admin").await.unwrap().is_admin);
@@ -108,6 +123,14 @@ async fn pg_store_full_integration() {
             .any(|u| u.sub == "u_admin"),
         "list_users surfaces the operator"
     );
+    let epoch_before_password = state.store.get_user("u_admin").await.unwrap().factor_epoch;
+    let rotated_hash = keystone::auth::hash_password("pg-rotated-password").unwrap();
+    let password_epoch = state
+        .store
+        .set_password_hash_and_bump_factor("u_admin", &rotated_hash)
+        .await
+        .expect("rotate password and factor epoch atomically");
+    assert_eq!(password_epoch, epoch_before_password + 1);
     let clients = state.store.list_clients().await;
     let listed = clients
         .iter()
@@ -133,6 +156,8 @@ async fn pg_store_full_integration() {
             sub: "u_admin".to_string(),
             expires_at: now_secs() + 60,
             used: false,
+            binding: None,
+            required_acr: None,
         })
         .await;
     let taken = state
@@ -170,16 +195,27 @@ async fn pg_store_full_integration() {
     );
 
     // sessions: put -> get -> delete.
+    let session_id = new_opaque_code();
     let sess = Session {
-        id: new_opaque_code(),
+        id: session_id.clone(),
         user_sub: "u_admin".to_string(),
         created_at: now_secs(),
         expires_at: now_secs() + 3600,
         user_agent: "pg-test-agent".to_string(),
         ip: "10.0.0.1".to_string(),
         last_seen: now_secs(),
+        session_binding: Some(keystone::auth::session_binding(&session_id)),
+        aal: keystone::store::AssuranceLevel::AalNone,
+        uv: false,
+        auth_time: 0,
+        amr: String::new(),
+        factor_epoch: by_email.factor_epoch,
     };
-    state.store.put_session(sess.clone()).await;
+    assert!(state
+        .store
+        .put_session_if_active(sess.clone())
+        .await
+        .expect("persist active session"));
     assert_eq!(
         state.store.get_session(&sess.id).await.map(|s| s.user_sub),
         Some("u_admin".to_string())
@@ -204,36 +240,158 @@ async fn pg_store_full_integration() {
         "revoke_other_sessions removed the non-kept session"
     );
     // re-put for the delete_session assertion below.
-    state.store.put_session(sess.clone()).await;
+    assert!(state
+        .store
+        .put_session_if_active(sess.clone())
+        .await
+        .expect("re-persist active session"));
     state.store.delete_session(&sess.id).await;
     assert!(
         state.store.get_session(&sess.id).await.is_none(),
         "session deleted"
     );
 
-    // TOTP config + recovery codes + login challenge.
+    // A token exchange queued behind the subject lifecycle lock must use time sampled after
+    // lock acquisition. Otherwise a request arriving just before expiry could wait indefinitely
+    // and still redeem with its stale caller timestamp.
+    let lock_suffix = new_opaque_code();
+    let lock_sub = format!("u_lock_{lock_suffix}");
     state
         .store
-        .put_totp(TotpConfig {
-            user_sub: "u_admin".to_string(),
-            secret: "JBSWY3DPEHPK3PXP".to_string(),
-            enabled: true,
-            created_at: now_secs(),
-            verified_at: now_secs(),
-        })
-        .await;
-    assert!(state.store.get_totp("u_admin").await.unwrap().enabled);
-    state
-        .store
-        .put_recovery_codes(
-            "u_admin",
-            vec!["hash-a".to_string(), "hash-b".to_string()],
+        .create_user(
+            &lock_sub,
+            &format!("lock-{lock_suffix}@example.invalid"),
+            &keystone::auth::hash_password("lock-wait-password").unwrap(),
             now_secs(),
         )
+        .await
+        .expect("create lock-wait subject");
+    let lock_user = state.store.get_user(&lock_sub).await.unwrap();
+    let lock_now = now_secs();
+    let lock_session_id = new_opaque_code();
+    let lock_session = Session {
+        id: lock_session_id.clone(),
+        user_sub: lock_sub.clone(),
+        created_at: lock_now,
+        expires_at: lock_now + 1,
+        user_agent: "pg-lock-wait-test".to_string(),
+        ip: "127.0.0.1".to_string(),
+        last_seen: lock_now,
+        session_binding: Some(keystone::auth::session_binding(&lock_session_id)),
+        aal: AssuranceLevel::MfaStrong,
+        uv: true,
+        auth_time: lock_now,
+        amr: "pwd,otp".to_string(),
+        factor_epoch: lock_user.factor_epoch,
+    };
+    assert!(state
+        .store
+        .put_session_if_active(lock_session.clone())
+        .await
+        .expect("persist lock-wait session"));
+    let lock_code = new_opaque_code();
+    state
+        .store
+        .put_code(AuthCode {
+            code: lock_code.clone(),
+            client_id: CLIENT_ID.to_string(),
+            redirect_uri: REDIRECT_URI.to_string(),
+            scope: "openid".to_string(),
+            nonce: None,
+            code_challenge: CHALLENGE.to_string(),
+            sub: lock_sub.clone(),
+            expires_at: lock_now + 60,
+            used: false,
+            binding: Some(AuthCodeBinding::from_session(&lock_session).unwrap()),
+            required_acr: Some("hf-aal-strong".to_string()),
+        })
         .await;
+
+    let mut blocker = inspection_pool.begin().await.expect("begin lock blocker");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&lock_sub)
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("hold subject lifecycle lock");
+    let redeem_store = Arc::clone(&state.store);
+    let redeem_task =
+        tokio::spawn(async move { redeem_store.redeem_code(&lock_code, lock_now).await });
+    tokio::time::sleep(Duration::from_millis(2_100)).await;
+    blocker.rollback().await.expect("release subject lock");
+    let redeemed = tokio::time::timeout(Duration::from_secs(5), redeem_task)
+        .await
+        .expect("redemption resumed after lock release")
+        .expect("redemption task joined")
+        .expect("redemption backend remained available");
+    assert!(
+        redeemed.is_none(),
+        "lock wait must not extend the bound session validity window"
+    );
+
+    // TOTP factor lifecycle: enrollment replacement, first counter, monotonic login counter,
+    // recovery consumption, and disable all share the subject advisory-lock boundary.
+    let epoch_before_totp = state.store.get_user("u_admin").await.unwrap().factor_epoch;
+    let enrollment_epoch = state
+        .store
+        .begin_totp_enrollment(TotpConfig {
+            user_sub: "u_admin".to_string(),
+            secret: "JBSWY3DPEHPK3PXP".to_string(),
+            enabled: false,
+            created_at: now_secs(),
+            verified_at: 0,
+            last_accepted_counter: None,
+        })
+        .await
+        .expect("begin TOTP enrollment");
+    assert_eq!(enrollment_epoch, epoch_before_totp + 1);
+    let totp_verified_at = now_secs();
+    assert!(state
+        .store
+        .enable_totp(
+            "u_admin",
+            "JBSWY3DPEHPK3PXP",
+            100,
+            totp_verified_at,
+            vec!["hash-a".to_string(), "hash-b".to_string()],
+        )
+        .await
+        .expect("enable exact pending TOTP"));
+    let enabled = state.store.get_totp("u_admin").await.unwrap();
+    assert!(enabled.enabled);
+    assert_eq!(enabled.last_accepted_counter, Some(100));
     assert_eq!(state.store.recovery_code_count("u_admin").await, 2);
-    assert!(state.store.take_recovery_code("u_admin", "hash-a").await);
-    assert!(!state.store.take_recovery_code("u_admin", "hash-a").await);
+    assert_eq!(
+        state
+            .store
+            .accept_totp_counter("u_admin", "JBSWY3DPEHPK3PXP", 101)
+            .await
+            .expect("advance TOTP counter"),
+        Some(enrollment_epoch)
+    );
+    assert_eq!(
+        state
+            .store
+            .accept_totp_counter("u_admin", "JBSWY3DPEHPK3PXP", 101)
+            .await
+            .expect("replay is deterministic"),
+        None,
+        "same TOTP counter cannot be accepted twice"
+    );
+    let recovery_epoch = state
+        .store
+        .take_recovery_code_and_bump_factor("u_admin", "hash-a")
+        .await
+        .expect("consume recovery code")
+        .expect("recovery code exists");
+    assert_eq!(recovery_epoch, enrollment_epoch + 1);
+    assert_eq!(
+        state
+            .store
+            .take_recovery_code_and_bump_factor("u_admin", "hash-a")
+            .await
+            .expect("replayed recovery code is deterministic"),
+        None
+    );
     let challenge = TotpChallenge {
         id: new_opaque_code(),
         user_sub: "u_admin".to_string(),
@@ -241,22 +399,36 @@ async fn pg_store_full_integration() {
         user_agent: "pg-totp-agent".to_string(),
         ip: "10.0.0.2".to_string(),
         expires_at: now_secs() + 300,
+        source_session_binding: Some("ab".repeat(32)),
+        expected_factor_epoch: Some(recovery_epoch),
+        required_acr: Some("hf-aal-strong".to_string()),
+        password_verified: true,
     };
     state.store.put_totp_challenge(challenge.clone()).await;
+    let taken = state
+        .store
+        .take_totp_challenge(&challenge.id)
+        .await
+        .expect("challenge round-trips");
+    assert_eq!(taken.user_agent, "pg-totp-agent");
     assert_eq!(
-        state
-            .store
-            .take_totp_challenge(&challenge.id)
-            .await
-            .map(|c| c.user_agent),
-        Some("pg-totp-agent".to_string())
+        taken.source_session_binding,
+        challenge.source_session_binding
     );
+    assert_eq!(taken.expected_factor_epoch, Some(recovery_epoch));
+    assert_eq!(taken.required_acr.as_deref(), Some("hf-aal-strong"));
+    assert!(taken.password_verified);
     assert!(state
         .store
         .take_totp_challenge(&challenge.id)
         .await
         .is_none());
-    state.store.delete_totp("u_admin").await;
+    let disable_epoch = state
+        .store
+        .disable_totp_and_bump_factor("u_admin")
+        .await
+        .expect("disable TOTP atomically");
+    assert_eq!(disable_epoch, recovery_epoch + 1);
     assert!(state.store.get_totp("u_admin").await.is_none());
     assert_eq!(state.store.recovery_code_count("u_admin").await, 0);
 
@@ -334,19 +506,50 @@ async fn pg_store_full_integration() {
         .await
         .expect("authoritative PAT miss")
         .is_none());
-    state.store.set_disabled("u_admin", true).await;
+    state
+        .store
+        .set_disabled("u_admin", true)
+        .await
+        .expect("disable admin");
     assert!(state
         .store
         .find_active_personal_token(&pat_hash, pat_now)
         .await
         .expect("disabled owner lookup")
         .is_none());
-    state.store.set_disabled("u_admin", false).await;
+    state
+        .store
+        .set_disabled("u_admin", false)
+        .await
+        .expect("enable admin");
     state
         .store
         .revoke_personal_token("u_admin", &pat.id, pat_now)
         .await
         .expect("revoke PAT");
+    assert_eq!(
+        state
+            .store
+            .revoke_personal_token("u_admin", &pat.id, 0)
+            .await,
+        Err(keystone::store::StoreError::Backend),
+        "zero cannot reactivate a PostgreSQL PAT"
+    );
+    state
+        .store
+        .revoke_personal_token("u_admin", &pat.id, pat_now + 60)
+        .await
+        .expect("repeat PostgreSQL PAT revoke");
+    let stored_revoked_at: i64 =
+        sqlx::query_scalar("SELECT revoked_at FROM personal_access_tokens WHERE id=$1")
+            .bind(&pat.id)
+            .fetch_one(&inspection_pool)
+            .await
+            .expect("inspect first PAT revocation timestamp");
+    assert_eq!(
+        stored_revoked_at, pat_now as i64,
+        "repeated revocation must preserve the first timestamp"
+    );
     assert!(state
         .store
         .find_active_personal_token(&pat_hash, pat_now)
@@ -382,14 +585,20 @@ async fn pg_store_full_integration() {
         .await
         .expect("revoke expired PAT fixture");
 
-    // webauthn credentials: put -> list -> get -> update passkey.
+    // WebAuthn registration invalidates prior assurance; authenticator counter updates do not.
+    let epoch_before_passkey = state.store.get_user("u_admin").await.unwrap().factor_epoch;
     let cred = Credential {
         cred_id: "cred-pg-1".to_string(),
         user_sub: "u_admin".to_string(),
         passkey: r#"{"v":1}"#.to_string(),
         created_at: now_secs(),
     };
-    state.store.put_credential(cred.clone()).await;
+    let passkey_epoch = state
+        .store
+        .put_credential_and_bump_factor(cred.clone())
+        .await
+        .expect("register passkey atomically");
+    assert_eq!(passkey_epoch, epoch_before_passkey + 1);
     assert_eq!(state.store.list_credentials("u_admin").await.len(), 1);
     assert_eq!(
         state
@@ -411,6 +620,11 @@ async fn pg_store_full_integration() {
             .map(|c| c.passkey),
         Some(r#"{"v":2}"#.to_string()),
         "counter/passkey update persisted"
+    );
+    assert_eq!(
+        state.store.get_user("u_admin").await.unwrap().factor_epoch,
+        passkey_epoch,
+        "authenticator signature-counter maintenance is not a factor reset"
     );
 
     // webauthn ceremony state: put -> single-use take.

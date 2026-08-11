@@ -34,12 +34,16 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, HeaderMap, V
 
 /// JSON POST with explicit Cookie header + double-submit `X-CSRF-Token`.
 fn json_post(uri: &str, cookie: &str, body: Vec<u8>) -> Request<Body> {
+    json_post_with_csrf(uri, cookie, CSRF, body)
+}
+
+fn json_post_with_csrf(uri: &str, cookie: &str, csrf: &str, body: Vec<u8>) -> Request<Body> {
     Request::builder()
         .method("POST")
         .uri(uri)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie)
-        .header("X-CSRF-Token", CSRF)
+        .header("X-CSRF-Token", csrf)
         .body(Body::from(body))
         .unwrap()
 }
@@ -65,7 +69,8 @@ async fn passkey_register_then_authenticate_end_to_end() {
     let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
 
     // --- Registration (session-protected) ----------------------------------
-    let session = keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session =
+        keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
     let reg_cookie = format!("__Host-session={session}; __Host-csrf={CSRF}");
 
     let (status, headers, body) = call(
@@ -109,6 +114,108 @@ async fn passkey_register_then_authenticate_end_to_end() {
         1,
         "one passkey stored"
     );
+
+    // --- On-demand strong step-up stays bound to the current weak session --
+    let strong_authorize_uri = "/authorize?response_type=code&client_id=sluice-dev\
+         &redirect_uri=http://127.0.0.1:9090/callback&scope=openid+email&state=step-up\
+         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256\
+         &acr_values=hf-aal-strong";
+    let (status, headers, _) = call(
+        &state,
+        Request::builder()
+            .uri(strong_authorize_uri)
+            .header(header::COOKIE, format!("__Host-session={session}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    let login_location = headers
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(login_location.starts_with("/login?return_to="));
+    let step_up_id = login_location
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("step_up="))
+        .expect("server-side step-up flow id");
+
+    let (status, headers, _) = call(
+        &state,
+        Request::builder()
+            .uri(&login_location)
+            .header(header::COOKIE, format!("__Host-session={session}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let step_up_csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+    let step_up_cookie = format!("__Host-session={session}; __Host-csrf={step_up_csrf}");
+    let begin_body = serde_json::to_vec(&serde_json::json!({
+        "username": "a-browser-value-cannot-switch-the-subject",
+        "return_to": strong_authorize_uri,
+        "step_up": step_up_id,
+    }))
+    .unwrap();
+    let (status, headers, body) = call(
+        &state,
+        json_post_with_csrf(
+            "/webauthn/authenticate/begin",
+            &step_up_cookie,
+            &step_up_csrf,
+            begin_body,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let wa_step_up = cookie_value(&headers, "__Host-wa").unwrap();
+    let rcr: RequestChallengeResponse = serde_json::from_slice(&body).unwrap();
+    let pkc = authenticator
+        .do_authentication(origin.clone(), rcr)
+        .expect("SoftPasskey step-up authentication");
+    let finish_cookie =
+        format!("__Host-session={session}; __Host-csrf={step_up_csrf}; __Host-wa={wa_step_up}");
+    let (status, headers, body) = call(
+        &state,
+        json_post_with_csrf(
+            "/webauthn/authenticate/finish",
+            &finish_cookie,
+            &step_up_csrf,
+            serde_json::to_vec(&pkc).unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "step-up finish: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let stepped_up_session =
+        cookie_value(&headers, "__Host-session").expect("step-up minted a new strong session");
+    assert_ne!(stepped_up_session, session);
+    let (status, headers, _) = call(
+        &state,
+        Request::builder()
+            .uri(strong_authorize_uri)
+            .header(
+                header::COOKIE,
+                format!("__Host-session={stepped_up_session}"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(headers
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("code="));
 
     // --- Authentication (passwordless — NO prior session) -------------------
     let auth_cookie = format!("__Host-csrf={CSRF}");
@@ -158,7 +265,8 @@ async fn passkey_register_then_authenticate_end_to_end() {
     // --- The passkey session drives the OIDC /authorize gate ----------------
     let authorize_uri = "/authorize?response_type=code&client_id=sluice-dev\
          &redirect_uri=http://127.0.0.1:9090/callback&scope=openid+email&state=s1\
-         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256";
+         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256\
+         &acr_values=hf-aal-strong";
     let req = Request::builder()
         .uri(authorize_uri)
         .header(header::COOKIE, format!("__Host-session={new_session}"))
@@ -168,11 +276,46 @@ async fn passkey_register_then_authenticate_end_to_end() {
     assert_eq!(
         status,
         StatusCode::FOUND,
-        "authorize with passkey session 302s"
+        "authorize with fresh UV passkey session satisfies strong ACR"
     );
     let loc = headers.get(header::LOCATION).unwrap().to_str().unwrap();
     assert!(
         loc.starts_with("http://127.0.0.1:9090/callback?code="),
         "got {loc}"
     );
+
+    // A factor reset between assertion begin and finish invalidates the ceremony epoch and must
+    // not mint even a weak fallback session.
+    let (status, headers, body) = call(
+        &state,
+        json_post(
+            "/webauthn/authenticate/begin",
+            &auth_cookie,
+            br#"{"username":"u_admin"}"#.to_vec(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let wa_race = cookie_value(&headers, "__Host-wa").unwrap();
+    let rcr: RequestChallengeResponse = serde_json::from_slice(&body).unwrap();
+    let pkc = authenticator
+        .do_authentication(origin, rcr)
+        .expect("SoftPasskey factor-race assertion");
+    state
+        .store
+        .bump_factor_epoch("u_admin")
+        .await
+        .expect("race factor epoch bump");
+    let race_cookie = format!("__Host-csrf={CSRF}; __Host-wa={wa_race}");
+    let (status, headers, _) = call(
+        &state,
+        json_post(
+            "/webauthn/authenticate/finish",
+            &race_cookie,
+            serde_json::to_vec(&pkc).unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(cookie_value(&headers, "__Host-session").is_none());
 }

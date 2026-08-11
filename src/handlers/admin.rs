@@ -48,7 +48,10 @@ async fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<User, Re
     };
     let Some(user) = state.store.get_user(&session.user_sub).await else {
         auth::destroy_session(state, headers).await;
-        return Err(redirect("/login", &[auth::clear_cookie(auth::SESSION_COOKIE)]));
+        return Err(redirect(
+            "/login",
+            &[auth::clear_cookie(auth::SESSION_COOKIE)],
+        ));
     };
     if !user.is_admin {
         return Err(notice(
@@ -123,11 +126,15 @@ pub async fn disable_user(
     let Some(target) = state.store.get_user(&form.sub).await else {
         return admin_reject("No such user.");
     };
-    state.store.set_disabled(&target.sub, true).await;
-    // Disabling must also terminate the account's live sessions — otherwise the disabled user keeps
-    // access until each session's TTL lapses. Reuse the owner-scoped revoke (empty keep_id => all),
-    // exactly as `revoke_user_sessions` does.
-    state.store.revoke_other_sessions(&target.sub, "").await;
+    if state.store.set_disabled(&target.sub, true).await.is_err() {
+        return notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Action unavailable",
+            "The account was not changed. Please try again.",
+            "/admin",
+            "Back to admin console",
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "admin.user.disable",
         &admin.email,
@@ -153,7 +160,33 @@ pub async fn enable_user(
     let Some(target) = state.store.get_user(&form.sub).await else {
         return admin_reject("No such user.");
     };
-    state.store.set_disabled(&target.sub, false).await;
+    let outcome = match state.store.set_disabled(&target.sub, false).await {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            return notice(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Action unavailable",
+                "The identity authority was not changed. Please try again.",
+                "/admin",
+                "Back to admin console",
+            )
+        }
+    };
+    if outcome.lifecycle_blocked {
+        state.audit.emit(AuditEvent::warning(
+            "admin.user.enable.lifecycle_blocked",
+            &admin.email,
+            &target.email,
+            "identity authority enabled; effective lifecycle fence remains non-active",
+        ));
+        return notice(
+            StatusCode::OK,
+            "Identity enabled",
+            "The registration authority is enabled, but the independent lifecycle fence still blocks sign-in.",
+            "/admin",
+            "Back to admin console",
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "admin.user.enable",
         &admin.email,
@@ -182,7 +215,7 @@ pub async fn force_reset(
         return admin_reject("No such user.");
     };
     let token = new_opaque_code();
-    state
+    if state
         .store
         .put_verification_token(VerificationToken {
             token: token.clone(),
@@ -190,7 +223,17 @@ pub async fn force_reset(
             kind: "reset".to_string(),
             expires_at: now_secs() + RESET_TTL,
         })
-        .await;
+        .await
+        .is_err()
+    {
+        return notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Reset unavailable",
+            "No reset link was created. Please try again.",
+            "/admin",
+            "Back to admin console",
+        );
+    }
     let link = format!("{}/reset?token={}", state.config.public_issuer, token);
     state.audit.emit(AuditEvent::info(
         "admin.user.reset_link",
@@ -264,7 +307,11 @@ pub async fn toggle_admin(
         "admin.user.toggle_admin",
         &admin.email,
         &target.email,
-        if grant { "admin granted" } else { "admin revoked" },
+        if grant {
+            "admin granted"
+        } else {
+            "admin revoked"
+        },
     ));
     redirect("/admin", &[])
 }
@@ -354,10 +401,20 @@ fn render_user_rows(
             if u.disabled {
                 actions.push_str(&action_form("/admin/users/enable", csrf, &u.sub, "Enable"));
             } else {
-                actions.push_str(&action_form("/admin/users/disable", csrf, &u.sub, "Disable"));
+                actions.push_str(&action_form(
+                    "/admin/users/disable",
+                    csrf,
+                    &u.sub,
+                    "Disable",
+                ));
             }
         }
-        actions.push_str(&action_form("/admin/users/reset", csrf, &u.sub, "Reset link"));
+        actions.push_str(&action_form(
+            "/admin/users/reset",
+            csrf,
+            &u.sub,
+            "Reset link",
+        ));
         actions.push_str(&action_form(
             "/admin/users/revoke-sessions",
             csrf,
@@ -365,8 +422,17 @@ fn render_user_rows(
             "Revoke sessions",
         ));
         if !is_self {
-            let label = if u.is_admin { "Remove admin" } else { "Make admin" };
-            actions.push_str(&action_form("/admin/users/toggle-admin", csrf, &u.sub, label));
+            let label = if u.is_admin {
+                "Remove admin"
+            } else {
+                "Make admin"
+            };
+            actions.push_str(&action_form(
+                "/admin/users/toggle-admin",
+                csrf,
+                &u.sub,
+                label,
+            ));
         }
         out.push_str(&format!(
             r#"<tr>

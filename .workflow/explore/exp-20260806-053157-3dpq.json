@@ -1,0 +1,25 @@
+{
+  "id": "exp-20260806-053157-3dpq",
+  "startedAt": "2026-08-06T03:31:57.122Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Keystone 的用户 disabled/active 状态、登录校验、session/PAT 存储与任何按 subject 禁用账户或吊销会话的内部 API，定位 JML leaver 立即阻止重新登录所需最小扩展点。\\nSCOPE: src/, migrations/, tests/\\nATTENTION: Rust axum、PostgreSQL/memory 双 store、internal service-token 或 mTLS；只读。\\nEXPECTED: file:line、现有不变量、建议 endpoint/事务边界。"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 1,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 508,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Keystone 的用户 disabled/active 状态、登录校验、session/PAT 存储与任何按 subject 禁用账户或吊销会话的内部 API，定位 JML leaver 立即阻止重新登录所需最小扩展点。\\nSCOPE: src/, migrations/, tests/\\nATTENTION: Rust axum、PostgreSQL/memory 双 store、internal service-token 或 mTLS；只读。\\nEXPECTED: file:line、现有不变量、建议 endpoint/事务边界。",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your usage limit for this billing cycle. Your quota will be refreshed in the next cycle. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/code/#pricing\"},\"type\":\"error\"}",
+      "durationMs": 507
+    }
+  ]
+}

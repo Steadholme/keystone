@@ -95,7 +95,7 @@ async fn in_memory_lookup_is_authoritative_for_lifecycle_and_user_state() {
     let state = configured_state();
     let now = now_secs();
     let plaintext = format!("pat_{}", new_opaque_code());
-    let mut token = put_pat(&state, &plaintext, now + 300, 0).await;
+    let token = put_pat(&state, &plaintext, now + 300, 0).await;
     let hash = keystone::auth::secret_hash(&plaintext);
 
     let active = state
@@ -112,43 +112,57 @@ async fn in_memory_lookup_is_authoritative_for_lifecycle_and_user_state() {
         .unwrap()
         .is_none());
 
-    token.revoked_at = now;
     state
         .store
-        .put_personal_token(token.clone())
+        .revoke_personal_token(&token.user_sub, &token.id, now)
         .await
-        .expect("store revoked PAT fixture");
+        .expect("revoke PAT fixture");
+    assert_eq!(
+        state
+            .store
+            .revoke_personal_token(&token.user_sub, &token.id, 0)
+            .await,
+        Err(StoreError::Backend),
+        "zero is never a valid revocation timestamp"
+    );
+    state
+        .store
+        .revoke_personal_token(&token.user_sub, &token.id, now + 60)
+        .await
+        .expect("repeated revoke is an idempotent no-op");
     assert!(state
         .store
         .find_active_personal_token(&hash, now)
         .await
         .unwrap()
         .is_none());
+    assert_eq!(
+        state.store.put_personal_token(token.clone()).await,
+        Err(StoreError::Backend),
+        "a revoked PAT record is immutable and cannot be reactivated by upsert"
+    );
 
-    token.revoked_at = 0;
-    token.expires_at = now;
-    state
-        .store
-        .put_personal_token(token.clone())
-        .await
-        .expect("store expired PAT fixture");
+    let expired_plaintext = format!("pat_{}", new_opaque_code());
+    let expired_hash = keystone::auth::secret_hash(&expired_plaintext);
+    put_pat(&state, &expired_plaintext, now, 0).await;
     assert!(state
         .store
-        .find_active_personal_token(&hash, now)
+        .find_active_personal_token(&expired_hash, now)
         .await
         .unwrap()
         .is_none());
 
-    token.expires_at = now + 300;
+    let disabled_plaintext = format!("pat_{}", new_opaque_code());
+    let disabled_hash = keystone::auth::secret_hash(&disabled_plaintext);
+    put_pat(&state, &disabled_plaintext, now + 300, 0).await;
     state
         .store
-        .put_personal_token(token)
+        .set_disabled("u_admin", true)
         .await
-        .expect("restore active PAT fixture");
-    state.store.set_disabled("u_admin", true).await;
+        .expect("disable user");
     assert!(state
         .store
-        .find_active_personal_token(&hash, now)
+        .find_active_personal_token(&disabled_hash, now)
         .await
         .unwrap()
         .is_none());
@@ -246,7 +260,11 @@ async fn invalid_revoked_expired_and_disabled_are_uniformly_inactive() {
     put_pat(&state, &expired, now, 0).await;
     let disabled = format!("pat_{}", new_opaque_code());
     put_pat(&state, &disabled, now + 300, 0).await;
-    state.store.set_disabled("u_admin", true).await;
+    state
+        .store
+        .set_disabled("u_admin", true)
+        .await
+        .expect("disable user");
 
     for plaintext in [revoked, expired, disabled] {
         let (status, headers, body) =

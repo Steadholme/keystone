@@ -91,14 +91,18 @@ async function registerPasskey() {
 }
 
 // --- Authentication (passwordless login) ------------------------------------
-async function authenticatePasskey(returnTo) {
+async function authenticatePasskey(returnTo, stepUp) {
   const username = (document.getElementById("wa-username") || {}).value || "";
   if (!username) { setStatus("wa-status", "Enter your username first.", "err"); return; }
   const btn = document.getElementById("passkey-login");
   setBusy(btn, true);
   setStatus("wa-status", "Touch your authenticator…", "");
   try {
-    const rc = await postJson("/webauthn/authenticate/begin", { username });
+    const rc = await postJson("/webauthn/authenticate/begin", {
+      username,
+      return_to: returnTo || "",
+      step_up: stepUp || "",
+    });
     const pk = rc.publicKey;
     pk.challenge = b64urlToBuf(pk.challenge);
     if (pk.allowCredentials) {
@@ -131,6 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (regBtn) regBtn.addEventListener("click", registerPasskey);
   const waBtn = document.getElementById("passkey-login");
   if (waBtn) {
-    waBtn.addEventListener("click", () => authenticatePasskey(waBtn.dataset.returnTo));
+    waBtn.addEventListener("click", () =>
+      authenticatePasskey(waBtn.dataset.returnTo, waBtn.dataset.stepUp));
   }
 });

@@ -58,7 +58,8 @@ async fn authorize_code(state: &AppState, client_id: &str, redirect_uri: &str) -
          &scope=openid+email+profile&state=xyz&code_challenge={CHALLENGE}\
          &code_challenge_method=S256&nonce=n-gw"
     );
-    let session_cookie = keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session_cookie =
+        keystone::auth::create_session(state, "u_admin", "test-agent", "127.0.0.1").await;
     let req = Request::builder()
         .uri(uri)
         .header(header::COOKIE, format!("__Host-session={session_cookie}"))
@@ -76,7 +77,12 @@ async fn authorize_code(state: &AppState, client_id: &str, redirect_uri: &str) -
 }
 
 /// `POST /token` with `client_secret_post` body fields (client_id + client_secret).
-fn token_post(code: &str, redirect_uri: &str, client_id: &str, secret: Option<&str>) -> Request<Body> {
+fn token_post(
+    code: &str,
+    redirect_uri: &str,
+    client_id: &str,
+    secret: Option<&str>,
+) -> Request<Body> {
     let mut body = format!(
         "grant_type=authorization_code&code={code}&redirect_uri={redirect_uri}\
          &client_id={client_id}&code_verifier={VERIFIER}"
@@ -124,7 +130,14 @@ async fn confidential_client_secret_post_success_and_nonce_roundtrips() {
     let id_token = tok["id_token"].as_str().expect("id_token").to_string();
 
     // Verify the id_token against the live JWKS; aud = requesting client_id, nonce echoed.
-    let (_, _, jwks_body) = call(&state, Request::builder().uri("/jwks.json").body(Body::empty()).unwrap()).await;
+    let (_, _, jwks_body) = call(
+        &state,
+        Request::builder()
+            .uri("/jwks.json")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
     let jwks: Value = serde_json::from_slice(&jwks_body).unwrap();
     let key = &jwks["keys"][0];
     let decoding =
@@ -135,7 +148,10 @@ async fn confidential_client_secret_post_success_and_nonce_roundtrips() {
     validation.set_audience(&[GW_CLIENT_ID]);
     let id = decode::<Value>(&id_token, &decoding, &validation).unwrap();
     assert_eq!(id.claims["aud"], GW_CLIENT_ID, "aud = requesting client_id");
-    assert_eq!(id.claims["nonce"], "n-gw", "nonce round-trips into id_token");
+    assert_eq!(
+        id.claims["nonce"], "n-gw",
+        "nonce round-trips into id_token"
+    );
     assert_eq!(id.claims["sub"], "u_admin");
 }
 
@@ -143,7 +159,11 @@ async fn confidential_client_secret_post_success_and_nonce_roundtrips() {
 async fn confidential_client_secret_basic_success() {
     let state = state_with_confidential_client().await;
     let code = authorize_code(&state, GW_CLIENT_ID, GW_REDIRECT).await;
-    let (status, _, _) = call(&state, token_basic(&code, GW_REDIRECT, GW_CLIENT_ID, GW_SECRET)).await;
+    let (status, _, _) = call(
+        &state,
+        token_basic(&code, GW_REDIRECT, GW_CLIENT_ID, GW_SECRET),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "HTTP Basic correct secret -> 200");
 }
 
@@ -164,8 +184,7 @@ async fn confidential_client_wrong_and_missing_secret_is_401() {
     assert_eq!(e["error"], "invalid_client");
 
     // Missing secret -> 401 invalid_client.
-    let (status, _, body) =
-        call(&state, token_post(&code, GW_REDIRECT, GW_CLIENT_ID, None)).await;
+    let (status, _, body) = call(&state, token_post(&code, GW_REDIRECT, GW_CLIENT_ID, None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "missing secret -> 401");
     let e: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(e["error"], "invalid_client");
@@ -176,7 +195,11 @@ async fn confidential_client_wrong_and_missing_secret_is_401() {
         token_post(&code, GW_REDIRECT, GW_CLIENT_ID, Some(GW_SECRET)),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "code survived failed auth -> redeemable");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "code survived failed auth -> redeemable"
+    );
 }
 
 #[tokio::test]
@@ -189,7 +212,11 @@ async fn public_client_still_redeems_with_pkce_only() {
         token_post(&code, "http://127.0.0.1:9090/callback", "sluice-dev", None),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "public client redeems with PKCE only");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "public client redeems with PKCE only"
+    );
 }
 
 #[tokio::test]
@@ -210,7 +237,11 @@ async fn confidential_client_basic_and_body_client_id_mismatch_is_401() {
         .body(Body::from(body))
         .unwrap();
     let (status, _, body) = call(&state, req).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "client_id mismatch -> 401");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "client_id mismatch -> 401"
+    );
     let e: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(e["error"], "invalid_client");
 }

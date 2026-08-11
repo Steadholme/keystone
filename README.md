@@ -58,6 +58,10 @@ curl -s http://127.0.0.1:8080/jwks.json | jq .
 | `GW_CLIENT_ID` | 机密网关客户端 id（Sluice 作为带 secret 的 OIDC RP） | `sluice-gw` |
 | `GW_CLIENT_SECRET` | 机密网关客户端密钥。**设置时**才会播种该客户端（Argon2id 哈希入库，幂等 UPSERT），并启用仅供该网关调用的 PAT introspection；不设置时 introspection fail closed 为 `503` | 无 |
 | `GW_REDIRECT_URI` | 网关客户端回调地址 | `https://id.w33d.xyz/_gw/auth/callback` |
+| `KEYSTONE_REGISTRATION_MAC_KID` | registration feed 当前 HMAC key id；`[A-Za-z0-9._-]`，最长 64 bytes。feed 上线时必填 | 无 |
+| `KEYSTONE_REGISTRATION_MAC_KEY` | registration feed 当前 HMAC-SHA256 secret；32–512 visible ASCII bytes。feed 上线时必填 | 无 |
+| `KEYSTONE_REGISTRATION_MAC_KID_PREV` | 滚动轮换期间可验签的上一 KID；必须与上一 key 成对配置，且不得等于当前 KID | 无 |
+| `KEYSTONE_REGISTRATION_MAC_KEY_PREV` | 滚动轮换期间可验签的上一 HMAC secret；必须与上一 KID 成对配置 | 无 |
 | `INTERNAL_TLS` | 内部 mTLS 开关，`on` 启用（其余/未设 = 关闭，行为不变） | 关闭 |
 | `INTERNAL_TLS_ADDR` | mTLS 监听地址（`INTERNAL_TLS=on` 时） | `0.0.0.0:8443` |
 | `INTERNAL_TLS_CERT` | 服务端证书 PEM 路径（Keyward 签发，CN/SAN=`keystone`） | 无（开 mTLS 时必填） |
@@ -141,6 +145,10 @@ docker run --rm -p 8080:8080 \
 | POST | `/token` | 消费单次授权码，校验 PKCE 与绑定，返回 access/id token |
 | GET | `/userinfo` | `Authorization: Bearer <access_token>`，返回 `{sub, email}` |
 | POST | `/internal/v1/pats/introspect` | 内部 PAT introspection；HTTP Basic 网关认证 + form `token`，返回权威 active 状态 |
+| POST | `/internal/v1/identity/registration/snapshot` | Access registration consumer 创建不可变 materialized snapshot；仅 mTLS + RegSig |
+| GET | `/internal/v1/identity/registration/snapshot/{snapshot_id}` | 按 immutable ordinal 分页读取同一 snapshot |
+| GET | `/internal/v1/identity/registration/changes` | 从严格连续 cursor 拉 full-state registration events |
+| POST | `/internal/v1/identity/registration/ack` | 持久化 generation-fenced、event/hash-bound 单调 ACK |
 | GET·POST | `/login` | 服务端渲染登录页（passkey 按钮 + 用户名/密码表单）；POST 校验 CSRF + Argon2 后建会话 |
 | GET | `/account` | 需会话：显示当前用户 + “注册 passkey” + 登出 |
 | POST | `/logout` | 校验 CSRF，销毁会话并清 cookie |
@@ -228,6 +236,104 @@ docker run --rm -e KEYSTONE_STORE=memory -e INTERNAL_TLS=on \
 curl --cacert tls/ca.crt --cert tls/client.crt --key tls/client.key \
   --resolve keystone:8443:127.0.0.1 https://keystone:8443/healthz
 ```
+
+## Access registration authority feed（`regfeed-v1`）
+
+该 feed 是 Keystone → Access Governance 的 identity registration authority，不是新的公网 API。
+生产启用必须同时满足：`KEYSTONE_STORE=postgres`、`INTERNAL_TLS=on`、当前 RegSig KID/key
+已配置，以及 Access 使用受 `INTERNAL_TLS_CLIENT_CA` 信任的客户端证书直连 mTLS listener。
+明文 `INTERNAL_HEALTH_ADDR` 只挂 `/healthz`，访问任意 `/internal` 路径均为 `404`；公网
+Sluice 也不得发布 `/internal`。缺少 mTLS 模式或 RegSig 配置时 feed fail closed 为 `503`。
+
+固定 consumer 是 `access-governance-registration-v1`，固定 service identity 是
+`access-governance`，固定 audience 是 `keystone-registration`；三者都是 compile-time protocol
+constant，不提供 env override。当前 source
+`generation` 存在 `identity_outbox_clock`，初始为 `1`；snapshot／changes 返回该 generation，
+Access 必须原样带回 ACK。恢复 authority 或 fenced cutover 时只能单调提升该 generation，旧
+generation ACK 返回 `409 ack_generation_conflict`。
+
+### Endpoints 与 DTO
+
+```text
+POST /internal/v1/identity/registration/snapshot
+body: empty
+201 {snapshot_id,generation,high_watermark,count,digest,acked_nonce}
+
+GET /internal/v1/identity/registration/snapshot/{snapshot_id}?after_ordinal=<u64>&limit=<1..1000>
+200 {snapshot_id,generation,high_watermark,digest,rows[],next_after_ordinal,done,acked_nonce}
+row  {ordinal,subject,account_version,registration_state,email_verified,enabled,payload_hash}
+
+GET /internal/v1/identity/registration/changes?after=<u64>&limit=<1..500>
+200 {generation,events[],head_cursor,retention_floor_cursor,acked_nonce}
+event {cursor,event_id,subject,account_version,registration_state,email_verified,enabled,
+       payload_hash,occurred_at}
+
+POST /internal/v1/identity/registration/ack
+body: {consumer,generation,cursor,event_id,payload_hash}
+200  {consumer,generation,stored_cursor,acked_nonce}
+```
+
+ACK JSON 使用 strict `deny_unknown_fields`；wire 字段是 `cursor`，不是旧草案的
+`acked_cursor`。所有通过 MAC/replay authentication 的响应，包括 `409`、`410`、`503`，
+都回显原请求 32-char lowerhex nonce 为 `acked_nonce`。响应统一带
+`Cache-Control: private, no-store` 与 `Vary: X-Keystone-RegSig`。
+
+冻结错误码：`400 malformed_sig|invalid_request`；
+`401 unknown_kid|stale|bad_mac|replay`；
+`409 snapshot_incomplete|ack_regression|ack_generation_conflict|ack_ahead|ack_event_mismatch`；
+`410 resnapshot_required`；
+`503 feed_gap|registration_feed_unavailable`。
+
+状态是 full-state snapshot：`registered | unverified | disabled | deleted`。`subject` 固定为
+`user:<raw Keystone sub>`。Access lifecycle 写回造成的 `disabled_by_lifecycle=true` 会从
+registration authority 投影中掩掉，因此不会形成自反馈；manual identity disable 仍正常输出
+`disabled`。create／verify／unverify／manual enable-disable／delete 在同一 PostgreSQL TX 中完成
+user/tombstone mutation、`account_version`、transactional cursor clock 与 outbox insert，任一失败
+整体回滚。
+
+### RegSig canonical bytes
+
+Header：`X-Keystone-RegSig: kid=<kid>,ts=<unix-seconds>,nonce=<32-lowerhex>,mac=<64-lowerhex>`。
+timestamp 允许的固定 skew 为 ±60s；nonce 在 PostgreSQL replay 表中原子 claim。当前 + previous
+KID 可验签，只有 current 用于新请求。canonical 字段以单个 `\n` 分隔，末尾无 LF：
+
+```text
+regfeed-v1
+access-governance
+keystone-registration
+<METHOD>
+<exact_path>
+<raw_query_fields_sorted_by_bytes>
+<lowerhex_sha256(raw_body)>
+<kid>
+<unix_seconds>
+<nonce>
+```
+
+snapshot POST 的 body hash 必须是 SHA256(empty)。snapshot digest v1 为
+`registration-snapshot-v1\n{high_watermark}`，随后按 1-based ordinal 为每行追加（前置 LF、
+最终无尾 LF）：
+
+```text
+\nR\t{ordinal}\t{subject}\t{account_version}\t{registration_state}\t{email_verified 0|1}\t{enabled 0|1}\t{payload_hash}
+```
+
+payload hash 为 lowerhex SHA256，canonical 是
+`registration-payload-v1\n{subject}\n{account_version}\n{registration_state}\n{email_verified 0|1}\n{enabled 0|1}`，
+末尾无 LF。
+
+### Migration 与 retention
+
+`PgStore::migrate` 以 additive、幂等 DDL 增加 `users.account_version`、
+`identity_outbox_clock`、`identity_registration_outbox`、retained tombstone、immutable snapshot
+manifest/rows、consumer ACK 与 durable replay 表。snapshot 在一个 `SERIALIZABLE` TX 中物化；
+sealed manifest/rows 由 PostgreSQL trigger 拒绝 UPDATE/DELETE。cursor 通过同 TX singleton clock
+分配，rollback 不消耗 cursor。
+
+ACK 后只会裁掉「所有已知 consumer 均已 ACK」且「连续前缀事件已超过 30 天」的 outbox；
+tombstone 永不物删。落后到 `after < retention_floor_cursor` 返回
+`410 {"error":"resnapshot_required","acked_nonce":"…"}`，Access 必须清除 snapshot readiness 并
+重新 materialize，不得以空页假追平。
 
 ## 审计事件发射（keystone → Watchtower，env 开关，默认关闭）
 

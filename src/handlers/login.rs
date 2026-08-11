@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use crate::audit::AuditEvent;
 use crate::auth;
+use crate::handlers::authorize::{return_to_requests_strong, STRONG_ACR};
 use crate::handlers::register::{client_ip, notice};
 use crate::store::{
     new_opaque_code, LoginEvent, PersonalAccessToken, Session, TotpChallenge, TotpConfig, User,
@@ -31,6 +32,8 @@ const RECOVERY_CODE_COUNT: usize = 10;
 pub struct LoginQuery {
     #[serde(default)]
     pub return_to: Option<String>,
+    #[serde(default)]
+    pub step_up: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +46,8 @@ pub struct LoginForm {
     pub csrf_token: String,
     #[serde(default)]
     pub return_to: Option<String>,
+    #[serde(default)]
+    pub step_up: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,11 +126,23 @@ pub async fn login_page(
     Query(q): Query<LoginQuery>,
 ) -> Response {
     let return_to = sanitize_return_to(q.return_to.as_deref());
-    if auth::current_session(&state, &headers).await.is_some() {
-        return redirect(&return_to, &[]);
+    let step_up = q.step_up.filter(|value| valid_flow_id(value));
+    if let Some(session) = auth::current_session(&state, &headers).await {
+        let Some(step_up) = step_up.as_deref() else {
+            return redirect(&return_to, &[]);
+        };
+        let Some(user) = state.store.get_user(&session.user_sub).await else {
+            return step_up_denied();
+        };
+        let csrf = auth::new_csrf_token();
+        let body = render_login(&csrf, &return_to, &user.email, Some(step_up), None);
+        return html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)]);
+    }
+    if step_up.is_some() {
+        return step_up_denied();
     }
     let csrf = auth::new_csrf_token();
-    let body = render_login(&csrf, &return_to, "", None);
+    let body = render_login(&csrf, &return_to, "", None, None);
     html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)])
 }
 
@@ -138,11 +155,23 @@ pub async fn login_submit(
     let return_to = sanitize_return_to(form.return_to.as_deref());
 
     if !auth::verify_csrf(&headers, &form.csrf_token) {
+        if form.step_up.is_some() {
+            return step_up_denied();
+        }
         return reject_login(
             &return_to,
             &form.username,
             "Invalid or expired form token — please try again.",
         );
+    }
+
+    if let Some(step_up) = form.step_up.as_deref().filter(|value| valid_flow_id(value)) {
+        return step_up_password_submit(&state, &headers, &form, step_up).await;
+    }
+    if return_to_requests_strong(&return_to)
+        && auth::current_session(&state, &headers).await.is_some()
+    {
+        return step_up_denied();
     }
 
     let user = state.store.get_user_by_username(&form.username).await;
@@ -171,6 +200,7 @@ pub async fn login_submit(
             &csrf,
             &return_to,
             &form.username,
+            None,
             Some("This account is disabled. Contact your administrator."),
         );
         return html_with_cookies(StatusCode::FORBIDDEN, body, &[auth::csrf_cookie(&csrf)]);
@@ -240,6 +270,10 @@ pub async fn login_submit(
 
     let ua = user_agent(&headers);
     let ip = client_ip(&headers);
+    let required_acr = return_to_requests_strong(&return_to).then(|| STRONG_ACR.to_string());
+    // A strong-ACR challenge is a step-up: recovery codes cannot satisfy it, so the TOTP page
+    // copy must not offer them. Captured before `required_acr` is moved into the challenge.
+    let strong_challenge = required_acr.is_some();
     if state
         .store
         .get_totp(&user.sub)
@@ -256,6 +290,10 @@ pub async fn login_submit(
                 user_agent: ua,
                 ip,
                 expires_at: now_secs() + TOTP_CHALLENGE_TTL,
+                source_session_binding: None,
+                expected_factor_epoch: Some(user.factor_epoch),
+                required_acr,
+                password_verified: true,
             })
             .await;
         record_login_event(
@@ -275,11 +313,37 @@ pub async fn login_submit(
             "password accepted; second factor required",
         ));
         let csrf = auth::new_csrf_token();
-        let body = render_totp_login(&csrf, &challenge_id, &return_to, None);
+        let body = render_totp_login(&csrf, &challenge_id, &return_to, strong_challenge, None);
         return html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)]);
     }
 
-    let cookie = auth::create_session(&state, &user.sub, &ua, &ip).await;
+    if return_to_requests_strong(&return_to) {
+        return step_up_denied();
+    }
+
+    let Some(cookie) = auth::try_create_session(&state, &user.sub, &ua, &ip).await else {
+        record_login_event(
+            &state,
+            &user.sub,
+            &form.username,
+            "password",
+            "failure",
+            "account no longer active",
+            &headers,
+        )
+        .await;
+        state.audit.emit(AuditEvent::warning(
+            "login.disabled",
+            &user.email,
+            "password",
+            "account no longer active",
+        ));
+        return reject_login(
+            &return_to,
+            &form.username,
+            "This account is not currently available. Contact your administrator.",
+        );
+    };
     record_login_event(
         &state,
         &user.sub,
@@ -322,18 +386,18 @@ pub async fn account_page(State(state): State<AppState>, headers: HeaderMap) -> 
     let login_events = state.store.list_login_events(&user.sub, 10).await;
     let tokens = state.store.list_personal_tokens(&user.sub).await;
     let csrf = auth::new_csrf_token();
-    let body = render_account(
-        &csrf,
-        &user.sub,
-        &user.email,
-        count,
-        &sessions,
-        &session.id,
-        totp.as_ref(),
+    let body = render_account(AccountView {
+        csrf: &csrf,
+        sub: &user.sub,
+        email: &user.email,
+        passkeys: count,
+        sessions: &sessions,
+        current_id: &session.id,
+        totp: totp.as_ref(),
         recovery_count,
-        &login_events,
-        &tokens,
-    );
+        login_events: &login_events,
+        tokens: &tokens,
+    });
     html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)])
 }
 
@@ -394,6 +458,84 @@ pub async fn revoke_other_sessions(
     redirect("/account", &[])
 }
 
+async fn step_up_password_submit(
+    state: &AppState,
+    headers: &HeaderMap,
+    form: &LoginForm,
+    flow_id: &str,
+) -> Response {
+    let Some(flow) = state.store.take_totp_challenge(flow_id).await else {
+        return step_up_denied();
+    };
+    let Some(expected_epoch) = flow.expected_factor_epoch else {
+        return step_up_denied();
+    };
+    if flow.required_acr.as_deref() != Some(STRONG_ACR)
+        || flow.password_verified
+        || flow.source_session_binding.is_none()
+        || !return_to_requests_strong(&flow.return_to)
+        || !source_session_matches(state, headers, &flow).await
+    {
+        return step_up_denied();
+    }
+    let Some(user) = state
+        .store
+        .get_user(&flow.user_sub)
+        .await
+        .filter(|user| !user.disabled && user.factor_epoch == expected_epoch)
+    else {
+        return step_up_denied();
+    };
+    let submitted_user_matches = state
+        .store
+        .get_user_by_username(&form.username)
+        .await
+        .is_some_and(|candidate| candidate.sub == user.sub);
+    if !submitted_user_matches || !verify_current_password(&user, &form.password) {
+        record_login_event(
+            state,
+            &user.sub,
+            &user.email,
+            "password",
+            "failure",
+            "step-up password verification failed",
+            headers,
+        )
+        .await;
+        return step_up_denied();
+    }
+    if !state
+        .store
+        .get_totp(&user.sub)
+        .await
+        .is_some_and(|factor| factor.enabled)
+    {
+        // Password-only can never satisfy the strong ACR. A passkey remains available from
+        // the prior page, but this password branch ends explicitly instead of minting weak.
+        return step_up_denied();
+    }
+
+    let challenge_id = new_opaque_code();
+    state
+        .store
+        .put_totp_challenge(TotpChallenge {
+            id: challenge_id.clone(),
+            user_sub: flow.user_sub,
+            return_to: flow.return_to.clone(),
+            user_agent: flow.user_agent,
+            ip: flow.ip,
+            expires_at: flow.expires_at,
+            source_session_binding: flow.source_session_binding,
+            expected_factor_epoch: Some(expected_epoch),
+            required_acr: Some(STRONG_ACR.to_string()),
+            password_verified: true,
+        })
+        .await;
+    let csrf = auth::new_csrf_token();
+    let body = render_totp_login(&csrf, &challenge_id, &flow.return_to, true, None);
+    html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)])
+}
+
 /// `POST /login/totp` — complete a password-accepted TOTP challenge and mint the session.
 pub async fn totp_login_submit(
     State(state): State<AppState>,
@@ -421,23 +563,78 @@ pub async fn totp_login_submit(
             "The verification challenge expired. Sign in again.",
         );
     };
+    if user.disabled {
+        return reject_login(
+            "/account",
+            "",
+            "The verification challenge expired. Sign in again.",
+        );
+    }
+    let expected_epoch_matches = challenge
+        .expected_factor_epoch
+        .is_none_or(|expected| expected == user.factor_epoch);
+    if !expected_epoch_matches
+        || (challenge.required_acr.as_deref() == Some(STRONG_ACR)
+            && (!challenge.password_verified || !return_to_requests_strong(&challenge.return_to)))
+        || !source_session_matches(&state, &headers, &challenge).await
+    {
+        return step_up_denied();
+    }
     let Some(mfa) = state.store.get_totp(&user.sub).await.filter(|m| m.enabled) else {
         return reject_login("/account", "", "Two-step verification is not enabled.");
     };
 
-    let (ok, method, detail) = if totp::verify_code(&mfa.secret, &form.code, now_secs()) {
-        (true, "totp", "totp login")
-    } else if state
-        .store
-        .take_recovery_code(
-            &user.sub,
-            &auth::secret_hash(&normalize_recovery_code(&form.code)),
+    let matched_counter = totp::matching_counter(&mfa.secret, &form.code, now_secs());
+    let (ok, method, detail, strong_epoch) = if let Some(counter) = matched_counter {
+        match state
+            .store
+            .accept_totp_counter(&user.sub, &mfa.secret, counter)
+            .await
+        {
+            Ok(Some(epoch))
+                if challenge
+                    .expected_factor_epoch
+                    .is_none_or(|expected| expected == epoch) =>
+            {
+                (true, "totp", "totp login", Some(epoch))
+            }
+            Ok(Some(_)) => (false, "totp", "factor changed during verification", None),
+            Ok(None) => (false, "totp", "invalid or replayed second factor", None),
+            Err(_) => {
+                return reject_login(
+                    &challenge.return_to,
+                    &user.email,
+                    "Verification is temporarily unavailable. Please sign in again.",
+                )
+            }
+        }
+    } else if challenge.required_acr.as_deref() == Some(STRONG_ACR) {
+        // Recovery proves account possession but is deliberately not a qualifying strong factor.
+        (
+            false,
+            "recovery",
+            "recovery cannot satisfy strong assurance",
+            None,
         )
-        .await
-    {
-        (true, "recovery", "recovery code login")
     } else {
-        (false, "totp", "invalid second factor")
+        match state
+            .store
+            .take_recovery_code_and_bump_factor(
+                &user.sub,
+                &auth::secret_hash(&normalize_recovery_code(&form.code)),
+            )
+            .await
+        {
+            Ok(Some(_)) => (true, "recovery", "recovery code login", None),
+            Ok(None) => (false, "totp", "invalid second factor", None),
+            Err(_) => {
+                return reject_login(
+                    &challenge.return_to,
+                    &user.email,
+                    "Verification is temporarily unavailable. Please sign in again.",
+                )
+            }
+        }
     };
 
     if !ok {
@@ -464,8 +661,37 @@ pub async fn totp_login_submit(
         );
     }
 
-    let cookie =
-        auth::create_session(&state, &user.sub, &challenge.user_agent, &challenge.ip).await;
+    let cookie = if let Some(epoch) = strong_epoch {
+        auth::try_create_strong_session_at_epoch(
+            &state,
+            &user.sub,
+            &challenge.user_agent,
+            &challenge.ip,
+            true,
+            "pwd,otp",
+            epoch,
+        )
+        .await
+    } else {
+        auth::try_create_session(&state, &user.sub, &challenge.user_agent, &challenge.ip).await
+    };
+    let Some(cookie) = cookie else {
+        record_login_event(
+            &state,
+            &user.sub,
+            &user.email,
+            method,
+            "failure",
+            "account no longer active",
+            &headers,
+        )
+        .await;
+        return reject_login(
+            "/account",
+            "",
+            "The verification challenge expired. Sign in again.",
+        );
+    };
     record_login_event(
         &state,
         &user.sub,
@@ -515,16 +741,27 @@ pub async fn totp_enroll(
     }
 
     let secret = totp::new_secret();
-    state
+    if state
         .store
-        .put_totp(TotpConfig {
+        .begin_totp_enrollment(TotpConfig {
             user_sub: user.sub.clone(),
             secret: secret.clone(),
             enabled: false,
             created_at: now_secs(),
             verified_at: 0,
+            last_accepted_counter: None,
         })
-        .await;
+        .await
+        .is_err()
+    {
+        return notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Two-step setup unavailable",
+            "Your factor state could not be updated safely. Please try again.",
+            "/account",
+            "Back to account",
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "mfa.totp.enroll_start",
         &user.email,
@@ -549,10 +786,11 @@ pub async fn totp_verify(
     if !auth::verify_csrf(&headers, &form.csrf_token) {
         return redirect("/account", &[]);
     }
-    let Some(mut cfg) = state.store.get_totp(&user.sub).await else {
+    let Some(cfg) = state.store.get_totp(&user.sub).await else {
         return redirect("/account", &[]);
     };
-    if !totp::verify_code(&cfg.secret, &form.code, now_secs()) {
+    let now = now_secs();
+    let Some(counter) = totp::matching_counter(&cfg.secret, &form.code, now) else {
         let csrf = auth::new_csrf_token();
         let body = render_totp_enroll(
             &csrf,
@@ -561,11 +799,8 @@ pub async fn totp_verify(
             Some("The verification code did not match. Try the current code from your app."),
         );
         return html_with_cookies(StatusCode::BAD_REQUEST, body, &[auth::csrf_cookie(&csrf)]);
-    }
+    };
 
-    cfg.enabled = true;
-    cfg.verified_at = now_secs();
-    state.store.put_totp(cfg).await;
     let codes: Vec<String> = (0..RECOVERY_CODE_COUNT)
         .map(|_| totp::new_recovery_code())
         .collect();
@@ -573,10 +808,24 @@ pub async fn totp_verify(
         .iter()
         .map(|c| auth::secret_hash(&normalize_recovery_code(c)))
         .collect();
-    state
+    let enabled = state
         .store
-        .put_recovery_codes(&user.sub, hashes, now_secs())
+        .enable_totp(&user.sub, &cfg.secret, counter, now, hashes)
         .await;
+    if !matches!(enabled, Ok(true)) {
+        let csrf = auth::new_csrf_token();
+        let body = render_totp_enroll(
+            &csrf,
+            &user.email,
+            &cfg.secret,
+            Some("The factor changed or could not be committed safely. Restart setup."),
+        );
+        return html_with_cookies(
+            StatusCode::SERVICE_UNAVAILABLE,
+            body,
+            &[auth::csrf_cookie(&csrf)],
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "mfa.totp.enabled",
         &user.email,
@@ -613,7 +862,20 @@ pub async fn totp_disable(
             "Back to account",
         );
     }
-    state.store.delete_totp(&user.sub).await;
+    if state
+        .store
+        .disable_totp_and_bump_factor(&user.sub)
+        .await
+        .is_err()
+    {
+        return notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Two-step disable unavailable",
+            "Your factor state could not be updated safely. Please try again.",
+            "/account",
+            "Back to account",
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "mfa.totp.disabled",
         &user.email,
@@ -786,34 +1048,63 @@ pub async fn logout(
 fn reject_login(return_to: &str, username: &str, msg: &str) -> Response {
     // A fresh CSRF token (and cookie) for the retry.
     let csrf = auth::new_csrf_token();
-    let body = render_login(&csrf, return_to, username, Some(msg));
+    let body = render_login(&csrf, return_to, username, None, Some(msg));
     html_with_cookies(StatusCode::UNAUTHORIZED, body, &[auth::csrf_cookie(&csrf)])
 }
 
-fn render_login(csrf: &str, return_to: &str, username: &str, error: Option<&str>) -> String {
+fn render_login(
+    csrf: &str,
+    return_to: &str,
+    username: &str,
+    step_up: Option<&str>,
+    error: Option<&str>,
+) -> String {
     let error_html = match error {
         Some(e) => format!(r#"<div class="alert">{}</div>"#, esc(e)),
         None => String::new(),
     };
+    // Only a strong re-confirmation request adds the notice. Ordinary sign-in is unchanged, and
+    // the notice is a static note (role="note"), not a second aria-live region.
+    let step_up_notice = if step_up.is_some() {
+        r#"<p class="auth-note" role="note">You're confirming a sensitive action, so a recent strong verification is required. Continue with your passkey, or your password and authenticator app.</p>"#
+    } else {
+        ""
+    };
     LOGIN_HTML
         .replace("{{ERROR}}", &error_html)
+        .replace("{{STEP_UP_NOTICE}}", step_up_notice)
         .replace("{{CSRF}}", &esc(csrf))
         .replace("{{RETURN_TO}}", &esc(return_to))
+        .replace("{{STEP_UP}}", &esc(step_up.unwrap_or("")))
         .replace("{{USERNAME}}", &esc(username))
 }
 
-fn render_account(
-    csrf: &str,
-    sub: &str,
-    email: &str,
+struct AccountView<'a> {
+    csrf: &'a str,
+    sub: &'a str,
+    email: &'a str,
     passkeys: usize,
-    sessions: &[Session],
-    current_id: &str,
-    totp: Option<&TotpConfig>,
+    sessions: &'a [Session],
+    current_id: &'a str,
+    totp: Option<&'a TotpConfig>,
     recovery_count: usize,
-    login_events: &[LoginEvent],
-    tokens: &[PersonalAccessToken],
-) -> String {
+    login_events: &'a [LoginEvent],
+    tokens: &'a [PersonalAccessToken],
+}
+
+fn render_account(view: AccountView<'_>) -> String {
+    let AccountView {
+        csrf,
+        sub,
+        email,
+        passkeys,
+        sessions,
+        current_id,
+        totp,
+        recovery_count,
+        login_events,
+        tokens,
+    } = view;
     // Display name: the email local-part (the closest thing to a human name we hold).
     let name = email
         .split('@')
@@ -841,10 +1132,35 @@ fn render_totp_login(
     csrf: &str,
     challenge_id: &str,
     return_to: &str,
+    strong: bool,
     error: Option<&str>,
 ) -> String {
+    // A strong step-up can only be satisfied by the authenticator code, so its copy must not
+    // invite recovery-code entry (recovery proves possession but is deliberately not a strong
+    // factor) and its mobile keyboard stays numeric. Ordinary two-step login keeps the
+    // recovery-code path, and recovery codes are `HF-xxxxx-xxxxx`, so its input must accept
+    // letters and hyphens rather than advertising a numeric-only keyboard.
+    let (subtitle, code_label, code_hint, code_inputmode) = if strong {
+        (
+            "A recent strong confirmation is required to continue.",
+            "Authenticator code",
+            "Enter a code from your authenticator app. Recovery codes cannot be used for this step.",
+            "numeric",
+        )
+    } else {
+        (
+            "Enter a code from your authenticator app, or a recovery code.",
+            "Verification code",
+            "Lost your device? Enter one of your one-time recovery codes instead.",
+            "text",
+        )
+    };
     TOTP_LOGIN_HTML
         .replace("{{ERROR}}", &error_html(error))
+        .replace("{{SUBTITLE}}", subtitle)
+        .replace("{{CODE_LABEL}}", code_label)
+        .replace("{{CODE_HINT}}", code_hint)
+        .replace("{{CODE_INPUTMODE}}", code_inputmode)
         .replace("{{CSRF}}", &esc(csrf))
         .replace("{{CHALLENGE_ID}}", &esc(challenge_id))
         .replace("{{RETURN_TO}}", &esc(return_to))
@@ -1259,11 +1575,51 @@ pub(crate) fn user_agent(headers: &HeaderMap) -> String {
 }
 
 /// Only allow same-origin relative paths as a post-login redirect target (no open redirect).
-fn sanitize_return_to(raw: Option<&str>) -> String {
+pub(crate) fn sanitize_return_to(raw: Option<&str>) -> String {
     match raw {
-        Some(r) if r.starts_with('/') && !r.starts_with("//") => r.to_string(),
+        Some(r)
+            if r.starts_with('/')
+                && !r.starts_with("//")
+                && !r.contains('\\')
+                && !r.chars().any(char::is_control) =>
+        {
+            r.to_string()
+        }
         _ => "/account".to_string(),
     }
+}
+
+fn valid_flow_id(value: &str) -> bool {
+    (32..=256).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+async fn source_session_matches(
+    state: &AppState,
+    headers: &HeaderMap,
+    challenge: &TotpChallenge,
+) -> bool {
+    let Some(expected_binding) = challenge.source_session_binding.as_deref() else {
+        return true;
+    };
+    auth::current_session(state, headers)
+        .await
+        .is_some_and(|session| {
+            session.user_sub == challenge.user_sub
+                && session.session_binding.as_deref() == Some(expected_binding)
+        })
+}
+
+fn step_up_denied() -> Response {
+    notice(
+        StatusCode::FORBIDDEN,
+        "Access denied",
+        "Strong verification was not completed. Start the sign-in request again or enroll a qualifying factor.",
+        "/account",
+        "Back to account",
+    )
 }
 
 /// Minimal HTML escaping for text/attribute interpolation.
@@ -1429,5 +1785,40 @@ mod tests {
             .expect("authoritative lookup after failed revocation")
             .expect("token remains active after failed revocation");
         assert_eq!(persisted.id, token.id);
+    }
+
+    #[test]
+    fn return_to_rejects_backslash_and_control_redirects() {
+        assert_eq!(sanitize_return_to(Some(r"/\evil")), "/account");
+        assert_eq!(
+            sanitize_return_to(Some("/safe\r\nLocation: //evil")),
+            "/account"
+        );
+        assert_eq!(sanitize_return_to(Some("//evil.example")), "/account");
+        assert_eq!(
+            sanitize_return_to(Some("/authorize?state=a%26b")),
+            "/authorize?state=a%26b"
+        );
+    }
+
+    #[test]
+    fn totp_login_strong_step_up_is_numeric_and_recovery_free() {
+        let body = render_totp_login("csrf-token", "challenge-1", "/account", true, None);
+        assert!(body.contains(r#"inputmode="numeric""#));
+        assert!(!body.contains(r#"inputmode="text""#));
+        assert!(body.contains("A recent strong confirmation is required"));
+        // Strong step-up must not invite recovery-code entry.
+        assert!(!body.contains("or a recovery code"));
+        assert!(!body.contains("recovery codes instead"));
+    }
+
+    #[test]
+    fn totp_login_ordinary_is_text_input_and_still_advertises_recovery() {
+        let body = render_totp_login("csrf-token", "challenge-1", "/account", false, None);
+        // Recovery codes are HF-xxxxx-xxxxx, so the ordinary login keyboard must accept letters
+        // and hyphens rather than a numeric-only keypad.
+        assert!(body.contains(r#"inputmode="text""#));
+        assert!(!body.contains(r#"inputmode="numeric""#));
+        assert!(body.contains("recovery code"));
     }
 }

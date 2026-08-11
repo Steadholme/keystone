@@ -60,12 +60,17 @@
           <p class="auth-card__sub">Use your passkey or password to continue.</p>
         </header>
 
+        <!-- Static step-up notice (not a live region): present only when a strong
+             re-confirmation is being requested. -->
+        {{STEP_UP_NOTICE}}
+
         <!-- aria-live region: server-rendered errors + dynamic alerts are announced -->
         <div class="alert-area" role="alert" aria-live="assertive">{{ERROR}}</div>
 
         <form class="auth-form" method="post" action="/login">
           <input type="hidden" name="csrf_token" value="{{CSRF}}">
           <input type="hidden" name="return_to" value="{{RETURN_TO}}">
+          <input type="hidden" name="step_up" value="{{STEP_UP}}">
 
           <div class="field">
             <label for="wa-username">Username or email</label>
@@ -75,7 +80,7 @@
 
           <!-- PRIMARY / hero action: passwordless passkey sign-in -->
           <button id="passkey-login" class="btn btn-primary btn-block btn-hero" type="button"
-                  data-return-to="{{RETURN_TO}}">
+                  data-return-to="{{RETURN_TO}}" data-step-up="{{STEP_UP}}">
             <span class="btn-content">
               <span class="btn-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11a4 4 0 0 0-4 4v1"/><path d="M16 15.5c0-2.2-1.8-4-4-4"/><path d="M12 7a4 4 0 0 1 4 4v3.5"/><path d="M7.5 8.5a6 6 0 0 1 9 .5"/><path d="M12 11v8"/><path d="M9 19.5c-.4-.8-.5-1.7-.5-2.5"/></svg>

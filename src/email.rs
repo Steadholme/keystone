@@ -261,7 +261,8 @@ mod tests {
             subject: "s".to_string(),
             body: "b".to_string(),
         };
-        let v: serde_json::Value = serde_json::from_str(&serde_json::to_string(&msg).unwrap()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&msg).unwrap()).unwrap();
         let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
         assert_eq!(keys, vec!["body", "from", "subject", "to"]);

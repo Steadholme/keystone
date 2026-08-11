@@ -79,6 +79,58 @@ pub fn app(state: AppState) -> Router {
                     handlers::introspect::privacy_headers,
                 )),
         )
+        .route(
+            "/internal/v1/jml/subjects/lifecycle",
+            post(handlers::lifecycle::apply_lifecycle)
+                .layer(DefaultBodyLimit::max(
+                    handlers::lifecycle::MAX_LIFECYCLE_JSON_LEN,
+                ))
+                .layer(axum::middleware::from_fn(
+                    handlers::lifecycle::privacy_headers,
+                )),
+        )
+        .route(
+            "/internal/v1/session-assurance",
+            post(handlers::assurance::lookup)
+                .layer(DefaultBodyLimit::max(
+                    handlers::assurance::MAX_ASSURANCE_JSON_LEN,
+                ))
+                .layer(axum::middleware::from_fn(
+                    handlers::lifecycle::privacy_headers,
+                )),
+        )
+        .route(
+            "/internal/v1/identity/registration/snapshot",
+            post(handlers::registration::create_snapshot)
+                .layer(DefaultBodyLimit::max(
+                    handlers::registration::MAX_REGISTRATION_JSON_LEN,
+                ))
+                .layer(axum::middleware::from_fn(
+                    handlers::registration::privacy_headers,
+                )),
+        )
+        .route(
+            "/internal/v1/identity/registration/snapshot/{snapshot_id}",
+            get(handlers::registration::snapshot_page).layer(axum::middleware::from_fn(
+                handlers::registration::privacy_headers,
+            )),
+        )
+        .route(
+            "/internal/v1/identity/registration/changes",
+            get(handlers::registration::changes).layer(axum::middleware::from_fn(
+                handlers::registration::privacy_headers,
+            )),
+        )
+        .route(
+            "/internal/v1/identity/registration/ack",
+            post(handlers::registration::acknowledge)
+                .layer(DefaultBodyLimit::max(
+                    handlers::registration::MAX_REGISTRATION_JSON_LEN,
+                ))
+                .layer(axum::middleware::from_fn(
+                    handlers::registration::privacy_headers,
+                )),
+        )
         // --- Login surface ---
         .route("/", get(handlers::login::root_redirect))
         .route(
@@ -162,6 +214,12 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Loopback-only liveness router. The plaintext health listener deliberately does not mount
+/// any OIDC or `/internal` route, so registration-feed requests can only reach the mTLS app.
+pub fn health_app() -> Router {
+    Router::new().route("/healthz", get(handlers::discovery::healthz))
+}
+
 /// Construct dev state: dev [`Config`], a seeded [`InMemoryStore`], and a freshly
 /// generated [`SigningKey`]. Used by `main` and by the integration test.
 pub fn build_dev_state() -> AppState {
@@ -211,7 +269,10 @@ pub async fn build_state_from_env() -> Result<AppState, String> {
                 .map_err(|e| format!("connect postgres: {e}"))?;
             pg.migrate()
                 .await
-                .map_err(|e| format!("run migrations: {e}"))?;
+                // SQLx constraint errors can include the complete failing row. Migration
+                // repair touches PAT rows, so never propagate database details to startup
+                // logs where a token lookup hash could be disclosed.
+                .map_err(|_| "run migrations: database error".to_string())?;
             pg.seed(&config::seed_client(), &config::seed_user())
                 .await
                 .map_err(|e| format!("seed dev client/user: {e}"))?;

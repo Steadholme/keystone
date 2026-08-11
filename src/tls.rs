@@ -122,9 +122,8 @@ pub async fn serve(addr: SocketAddr, config: ServerConfig, app: Router) -> std::
             let io = TokioIo::new(tls);
             // Adapt the axum Router (a tower Service over Request<Body>) to a hyper
             // service over Request<Incoming> by mapping the body.
-            let service = service_fn(move |req: Request<Incoming>| {
-                app.clone().call(req.map(Body::new))
-            });
+            let service =
+                service_fn(move |req: Request<Incoming>| app.clone().call(req.map(Body::new)));
             if let Err(e) = hyper::server::conn::http1::Builder::new()
                 .serve_connection(io, service)
                 .await

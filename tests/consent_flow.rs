@@ -44,7 +44,18 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 }
 
 fn location(headers: &HeaderMap) -> String {
-    headers.get(header::LOCATION).unwrap().to_str().unwrap().to_string()
+    headers
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+fn hidden_value(html: &str, name: &str) -> String {
+    let marker = format!(r#"name="{name}" value=""#);
+    let start = html.find(&marker).expect("hidden field") + marker.len();
+    html[start..].chars().take_while(|ch| *ch != '"').collect()
 }
 
 fn authorize_uri(client_id: &str, redirect_uri: &str) -> String {
@@ -78,17 +89,20 @@ async fn seed_third_party(state: &AppState) {
 }
 
 /// Build a consent POST carrying the request verbatim + a decision.
-fn consent_post(decision: &str, csrf: &str, session: &str) -> Request<Body> {
+fn consent_post(decision: &str, csrf: &str, acr_binding: &str, session: &str) -> Request<Body> {
     let body = format!(
         "response_type=code&client_id={TP_ID}&redirect_uri={TP_REDIRECT}\
          &scope=openid+email+profile&state=xyz&nonce=n1&code_challenge={CHALLENGE}\
-         &code_challenge_method=S256&csrf_token={csrf}&decision={decision}"
+         &code_challenge_method=S256&acr_binding={acr_binding}&csrf_token={csrf}&decision={decision}"
     );
     Request::builder()
         .method("POST")
         .uri("/authorize/consent")
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .header(header::COOKIE, format!("__Host-session={session}; __Host-csrf={csrf}"))
+        .header(
+            header::COOKIE,
+            format!("__Host-session={session}; __Host-csrf={csrf}"),
+        )
         .body(Body::from(body))
         .unwrap()
 }
@@ -99,10 +113,17 @@ async fn first_party_skips_consent() {
     let session = keystone::auth::create_session(&state, "u_admin", "ua", "ip").await;
     let (status, headers, _) = call(
         &state,
-        get_with_cookie(&authorize_uri(SEED_ID, SEED_REDIRECT), &format!("__Host-session={session}")),
+        get_with_cookie(
+            &authorize_uri(SEED_ID, SEED_REDIRECT),
+            &format!("__Host-session={session}"),
+        ),
     )
     .await;
-    assert_eq!(status, StatusCode::FOUND, "first-party gets a code immediately");
+    assert_eq!(
+        status,
+        StatusCode::FOUND,
+        "first-party gets a code immediately"
+    );
     assert!(location(&headers).starts_with(SEED_REDIRECT));
     assert!(location(&headers).contains("code="));
 }
@@ -115,16 +136,24 @@ async fn third_party_consent_deny_then_approve_then_remembered() {
     let sc = format!("__Host-session={session}");
 
     // 1. No prior consent -> the consent screen (200) naming the client + scopes.
-    let (status, headers, body) =
-        call(&state, get_with_cookie(&authorize_uri(TP_ID, TP_REDIRECT), &sc)).await;
+    let (status, headers, body) = call(
+        &state,
+        get_with_cookie(&authorize_uri(TP_ID, TP_REDIRECT), &sc),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "third-party is prompted");
     let html = String::from_utf8_lossy(&body);
     assert!(html.contains("Third Party App"), "client name shown");
-    assert!(html.contains("Read your email address"), "scope description shown");
+    assert!(
+        html.contains("Read your email address"),
+        "scope description shown"
+    );
     let csrf = cookie_value(&headers, "__Host-csrf").expect("consent issues csrf");
+    let acr_binding = hidden_value(&html, "acr_binding");
 
     // 2. Deny -> 302 back with error=access_denied.
-    let (status, headers, _) = call(&state, consent_post("deny", &csrf, &session)).await;
+    let (status, headers, _) =
+        call(&state, consent_post("deny", &csrf, &acr_binding, &session)).await;
     assert_eq!(status, StatusCode::FOUND);
     let loc = location(&headers);
     assert!(loc.starts_with(TP_REDIRECT), "got {loc}");
@@ -132,15 +161,29 @@ async fn third_party_consent_deny_then_approve_then_remembered() {
     assert!(!loc.contains("code="));
 
     // 3. Approve -> 302 back with a code.
-    let (status, headers, _) = call(&state, consent_post("approve", &csrf, &session)).await;
+    let (status, headers, _) = call(
+        &state,
+        consent_post("approve", &csrf, &acr_binding, &session),
+    )
+    .await;
     assert_eq!(status, StatusCode::FOUND);
     let loc = location(&headers);
-    assert!(loc.starts_with(TP_REDIRECT) && loc.contains("code="), "got {loc}");
+    assert!(
+        loc.starts_with(TP_REDIRECT) && loc.contains("code="),
+        "got {loc}"
+    );
 
     // 4. Consent is remembered: the next authorize for the same scopes skips the screen.
-    let (status, headers, _) =
-        call(&state, get_with_cookie(&authorize_uri(TP_ID, TP_REDIRECT), &sc)).await;
-    assert_eq!(status, StatusCode::FOUND, "remembered consent skips the screen");
+    let (status, headers, _) = call(
+        &state,
+        get_with_cookie(&authorize_uri(TP_ID, TP_REDIRECT), &sc),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FOUND,
+        "remembered consent skips the screen"
+    );
     assert!(location(&headers).contains("code="));
 }
 
@@ -163,5 +206,98 @@ async fn consent_requires_csrf() {
         .body(Body::from(body))
         .unwrap();
     let (status, _, _) = call(&state, req).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "missing CSRF cookie is refused");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "missing CSRF cookie is refused"
+    );
+}
+
+#[tokio::test]
+async fn consent_round_trips_strong_acr_and_encodes_state() {
+    let state = keystone::build_dev_state();
+    seed_third_party(&state).await;
+    let epoch = state.store.get_user("u_admin").await.unwrap().factor_epoch;
+    let session = keystone::auth::try_create_strong_session_at_epoch(
+        &state, "u_admin", "ua", "ip", true, "pwd,otp", epoch,
+    )
+    .await
+    .unwrap();
+    let uri = format!(
+        "{}&acr_values=hf-aal-strong&state=a%26b%3Dc",
+        authorize_uri(TP_ID, TP_REDIRECT).replace("&state=xyz", "")
+    );
+    let (status, headers, body) = call(
+        &state,
+        get_with_cookie(&uri, &format!("__Host-session={session}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains(r#"name="acr_values" value="hf-aal-strong""#));
+    let acr_binding = hidden_value(&html, "acr_binding");
+    let csrf = cookie_value(&headers, "__Host-csrf").unwrap();
+
+    // Removing the requested ACR while retaining the server-issued binding cannot downgrade
+    // this consent POST to the ordinary path.
+    let downgraded = format!(
+        "response_type=code&client_id={TP_ID}&redirect_uri={TP_REDIRECT}\
+         &scope=openid+email+profile&state=a%26b%3Dc&nonce=n1&code_challenge={CHALLENGE}\
+         &code_challenge_method=S256&acr_binding={acr_binding}&csrf_token={csrf}&decision=approve"
+    );
+    let request = Request::builder()
+        .method("POST")
+        .uri("/authorize/consent")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            header::COOKIE,
+            format!("__Host-session={session}; __Host-csrf={csrf}"),
+        )
+        .body(Body::from(downgraded))
+        .unwrap();
+    let (status, _, _) = call(&state, request).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // A binding from the same CSRF/client/redirect cannot be mixed with another
+    // state, PKCE verifier, scope, nonce, or other authorize flow field.
+    let mixed_flow = format!(
+        "response_type=code&client_id={TP_ID}&redirect_uri={TP_REDIRECT}\
+		 &scope=openid+email+profile&state=a%26b%3Dc&nonce=n1&code_challenge=forged-challenge\
+		 &code_challenge_method=S256&acr_values=hf-aal-strong&acr_binding={acr_binding}\
+		 &csrf_token={csrf}&decision=approve"
+    );
+    let request = Request::builder()
+        .method("POST")
+        .uri("/authorize/consent")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            header::COOKIE,
+            format!("__Host-session={session}; __Host-csrf={csrf}"),
+        )
+        .body(Body::from(mixed_flow))
+        .unwrap();
+    let (status, _, _) = call(&state, request).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let body = format!(
+        "response_type=code&client_id={TP_ID}&redirect_uri={TP_REDIRECT}\
+         &scope=openid+email+profile&state=a%26b%3Dc&nonce=n1&code_challenge={CHALLENGE}\
+         &code_challenge_method=S256&acr_values=hf-aal-strong&acr_binding={acr_binding}\
+         &csrf_token={csrf}&decision=approve"
+    );
+    let request = Request::builder()
+        .method("POST")
+        .uri("/authorize/consent")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            header::COOKIE,
+            format!("__Host-session={session}; __Host-csrf={csrf}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let (status, headers, _) = call(&state, request).await;
+    assert_eq!(status, StatusCode::FOUND);
+    let redirect = location(&headers);
+    assert!(redirect.contains("code="), "{redirect}");
+    assert!(redirect.contains("state=a%26b%3Dc"), "{redirect}");
 }

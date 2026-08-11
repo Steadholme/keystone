@@ -51,7 +51,10 @@ async fn main() {
         serve_internal_tls(&config, issuer, app).await;
     } else {
         // Unchanged plaintext behavior: serve the app on bind_addr.
-        let addr: SocketAddr = config.bind_addr.parse().expect("invalid bind_addr in config");
+        let addr: SocketAddr = config
+            .bind_addr
+            .parse()
+            .expect("invalid bind_addr in config");
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
@@ -98,8 +101,9 @@ async fn serve_internal_tls(config: &keystone::config::Config, issuer: String, a
         .parse()
         .expect("invalid INTERNAL_HEALTH_ADDR");
 
-    // Plaintext loopback health listener for the HEALTHCHECK (serves the same app).
-    let health_app = app.clone();
+    // Plaintext loopback health listener for the HEALTHCHECK. It mounts only `/healthz`;
+    // the full app and every `/internal` endpoint remain exclusive to the mTLS listener.
+    let health_app = keystone::health_app();
     tokio::spawn(async move {
         match tokio::net::TcpListener::bind(health_addr).await {
             Ok(listener) => {

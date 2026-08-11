@@ -102,7 +102,10 @@ pub async fn register_submit(
     Form(form): Form<RegisterForm>,
 ) -> Response {
     if !auth::verify_csrf(&headers, &form.csrf_token) {
-        return reject_register(&form.email, "Invalid or expired form token — please try again.");
+        return reject_register(
+            &form.email,
+            "Invalid or expired form token — please try again.",
+        );
     }
     if !state.rate_limiter.check(&client_ip(&headers)) {
         return reject_register(
@@ -116,10 +119,7 @@ pub async fn register_submit(
         return reject_register(&form.email, "Enter a valid email address.");
     }
     if form.password.len() < MIN_PASSWORD_LEN {
-        return reject_register(
-            &form.email,
-            "Password must be at least 8 characters.",
-        );
+        return reject_register(&form.email, "Password must be at least 8 characters.");
     }
 
     let hash = match auth::hash_password(&form.password) {
@@ -130,22 +130,19 @@ pub async fn register_submit(
     };
 
     let sub = format!("usr_{}", new_opaque_code());
+    let token = new_opaque_code();
+    let verification_token = VerificationToken {
+        token: token.clone(),
+        sub: sub.clone(),
+        kind: "verify".to_string(),
+        expires_at: now_secs() + VERIFY_TTL,
+    };
     match state
         .store
-        .create_user(&sub, email, &hash, now_secs())
+        .create_user_with_verification_token(&sub, email, &hash, now_secs(), verification_token)
         .await
     {
         Ok(()) => {
-            let token = new_opaque_code();
-            state
-                .store
-                .put_verification_token(VerificationToken {
-                    token: token.clone(),
-                    sub: sub.clone(),
-                    kind: "verify".to_string(),
-                    expires_at: now_secs() + VERIFY_TTL,
-                })
-                .await;
             let link = format!("{}/verify?token={}", state.config.public_issuer, token);
             state.email.send(
                 email,
@@ -192,9 +189,12 @@ pub async fn verify(State(state): State<AppState>, Query(q): Query<TokenQuery>) 
     let Some(token) = q.token.filter(|t| !t.is_empty()) else {
         return invalid_link_notice();
     };
-    match state.store.take_verification_token(&token).await {
-        Some((sub, kind)) if kind == "verify" => {
-            state.store.set_email_verified(&sub).await;
+    match state
+        .store
+        .consume_verification_token_and_verify(&token)
+        .await
+    {
+        Ok(Some(sub)) => {
             let actor = state
                 .store
                 .get_user(&sub)
@@ -215,7 +215,14 @@ pub async fn verify(State(state): State<AppState>, Query(q): Query<TokenQuery>) 
                 "Continue to sign in",
             )
         }
-        _ => invalid_link_notice(),
+        Ok(None) => invalid_link_notice(),
+        Err(_) => notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Verification unavailable",
+            "Your verification link was not consumed. Please try again in a moment.",
+            "/login",
+            "Back to sign in",
+        ),
     }
 }
 
@@ -239,7 +246,10 @@ pub async fn forgot_submit(
 ) -> Response {
     if !auth::verify_csrf(&headers, &form.csrf_token) {
         let csrf = auth::new_csrf_token();
-        let body = render_forgot(&csrf, Some("Invalid or expired form token — please try again."));
+        let body = render_forgot(
+            &csrf,
+            Some("Invalid or expired form token — please try again."),
+        );
         return html_with_cookies(StatusCode::OK, body, &[auth::csrf_cookie(&csrf)]);
     }
     // Throttle regardless of whether the email exists (defends the same-response invariant).
@@ -251,7 +261,7 @@ pub async fn forgot_submit(
                 // never an internal identifier — and only when a real account matches.
                 if user.email == email {
                     let token = new_opaque_code();
-                    state
+                    if state
                         .store
                         .put_verification_token(VerificationToken {
                             token: token.clone(),
@@ -259,19 +269,22 @@ pub async fn forgot_submit(
                             kind: "reset".to_string(),
                             expires_at: now_secs() + RESET_TTL,
                         })
-                        .await;
-                    let link = format!("{}/reset?token={}", state.config.public_issuer, token);
-                    state.email.send(
-                        email,
-                        "Reset your Steadholme password",
-                        &reset_email_body(&link),
-                    );
-                    state.audit.emit(AuditEvent::info(
-                        "password.forgot",
-                        email,
-                        "self-service",
-                        "reset link emailed",
-                    ));
+                        .await
+                        .is_ok()
+                    {
+                        let link = format!("{}/reset?token={}", state.config.public_issuer, token);
+                        state.email.send(
+                            email,
+                            "Reset your Steadholme password",
+                            &reset_email_body(&link),
+                        );
+                        state.audit.emit(AuditEvent::info(
+                            "password.forgot",
+                            email,
+                            "self-service",
+                            "reset link emailed",
+                        ));
+                    }
                 }
             }
         }
@@ -303,22 +316,25 @@ pub async fn reset_submit(
     Form(form): Form<ResetForm>,
 ) -> Response {
     if !auth::verify_csrf(&headers, &form.csrf_token) {
-        return reject_reset(&form.token, "Invalid or expired form token — please try again.");
+        return reject_reset(
+            &form.token,
+            "Invalid or expired form token — please try again.",
+        );
     }
     if form.password.len() < MIN_PASSWORD_LEN {
         return reject_reset(&form.token, "Password must be at least 8 characters.");
     }
 
-    match state.store.take_verification_token(&form.token).await {
-        Some((sub, kind)) if kind == "reset" => {
-            let hash = match auth::hash_password(&form.password) {
-                Ok(h) => h,
-                Err(_) => return reject_reset(&form.token, "Something went wrong. Please try again."),
-            };
-            state.store.set_password_hash(&sub, &hash).await;
-            // A completed reset proves control of the mailbox: verify the email too so a
-            // never-verified account can recover through this path.
-            state.store.set_email_verified(&sub).await;
+    let hash = match auth::hash_password(&form.password) {
+        Ok(h) => h,
+        Err(_) => return reject_reset(&form.token, "Something went wrong. Please try again."),
+    };
+    match state
+        .store
+        .consume_reset_token_and_rotate_password(&form.token, &hash)
+        .await
+    {
+        Ok(Some((sub, _factor_epoch))) => {
             let actor = state
                 .store
                 .get_user(&sub)
@@ -339,10 +355,17 @@ pub async fn reset_submit(
                 "Continue to sign in",
             )
         }
-        _ => notice(
+        Ok(None) => notice(
             StatusCode::OK,
             "Link expired",
             "This password reset link is invalid or has expired. Request a new one to continue.",
+            "/forgot",
+            "Request a new link",
+        ),
+        Err(_) => notice(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Password update unavailable",
+            "Your reset link was not consumed. Please try again in a moment.",
             "/forgot",
             "Request a new link",
         ),
@@ -405,7 +428,17 @@ pub async fn change_password(
             )
         }
     };
-    state.store.set_password_hash(&user.sub, &hash).await;
+    if state
+        .store
+        .set_password_hash_and_bump_factor(&user.sub, &hash)
+        .await
+        .is_err()
+    {
+        return account_notice(
+            "Couldn't update password",
+            "Your password could not be rotated safely. Please try again.",
+        );
+    }
     state.audit.emit(AuditEvent::info(
         "password.change",
         &user.email,
@@ -480,7 +513,13 @@ pub(crate) fn notice(
 
 /// A notice that links back to the account console (used by change-password outcomes).
 fn account_notice(title: &str, message: &str) -> Response {
-    notice(StatusCode::OK, title, message, "/account", "Back to account")
+    notice(
+        StatusCode::OK,
+        title,
+        message,
+        "/account",
+        "Back to account",
+    )
 }
 
 fn invalid_link_notice() -> Response {

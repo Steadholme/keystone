@@ -46,6 +46,10 @@ pub const DEFAULT_WATCHTOWER_URL: &str = "http://watchtower:8500";
 /// Default public issuer origin (`PUBLIC_ISSUER`) used to build the verification/reset
 /// links emailed to users — the browser-facing origin, NOT the internal `issuer`.
 pub const DEFAULT_PUBLIC_ISSUER: &str = "https://sso.w33d.xyz";
+/// Fixed audience bound into every registration-feed MAC. This is protocol, not runtime config.
+pub const DEFAULT_REGISTRATION_AUDIENCE: &str = "keystone-registration";
+/// Fixed Access consumer service identity bound into every registration-feed MAC.
+pub const DEFAULT_REGISTRATION_SERVICE_IDENTITY: &str = "access-governance";
 
 /// `From` address stamped on every transactional email Keystone sends.
 pub const MAIL_FROM: &str = "no-reply@w33d.xyz";
@@ -87,6 +91,22 @@ pub struct Config {
     pub gw_client_secret: Option<String>,
     /// Gateway client redirect URI (`GW_REDIRECT_URI`).
     pub gw_redirect_uri: String,
+    /// Dedicated Bearer credential for the authoritative internal JML lifecycle endpoint
+    /// (`KEYSTONE_JML_SERVICE_TOKEN`). Never logged or returned.
+    pub jml_service_token: Option<String>,
+    /// Independent Bearer credential for Sluice's authoritative session-assurance lookup.
+    /// This is deliberately unrelated to the downstream MFA assertion signing key.
+    pub assurance_service_token: Option<String>,
+    /// Previous lookup credential accepted only during a bounded rolling rotation. Sluice
+    /// instances still send exactly one active token; Keystone accepts current + previous so
+    /// old and new instances can overlap without weakening the authority boundary.
+    pub assurance_previous_service_token: Option<String>,
+    /// Current registration-feed HMAC key identifier and secret. The current key signs client
+    /// requests; Keystone verifies both current and optional previous during rotation.
+    pub registration_mac_kid: Option<String>,
+    pub registration_mac_key: Option<String>,
+    pub registration_previous_mac_kid: Option<String>,
+    pub registration_previous_mac_key: Option<String>,
     /// Internal mTLS toggle (`INTERNAL_TLS=on`). Default OFF — plain HTTP on `bind_addr`
     /// exactly as today. When ON, Keystone serves the app over mTLS on
     /// `internal_tls_addr` and a plaintext health listener on `internal_health_addr`.
@@ -141,6 +161,13 @@ impl Config {
             gw_client_id: DEFAULT_GW_CLIENT_ID.to_string(),
             gw_client_secret: None,
             gw_redirect_uri: DEFAULT_GW_REDIRECT_URI.to_string(),
+            jml_service_token: None,
+            assurance_service_token: None,
+            assurance_previous_service_token: None,
+            registration_mac_kid: None,
+            registration_mac_key: None,
+            registration_previous_mac_kid: None,
+            registration_previous_mac_key: None,
             internal_tls: false,
             internal_tls_addr: DEFAULT_INTERNAL_TLS_ADDR.to_string(),
             internal_tls_cert: None,
@@ -192,6 +219,16 @@ impl Config {
         if let Some(v) = env_nonempty("GW_REDIRECT_URI") {
             config.gw_redirect_uri = v;
         }
+        // Dedicated JML service credential. Strength is checked at request time so an empty
+        // or weak deployment fails this endpoint with 503 without affecting public OIDC health.
+        config.jml_service_token = env_nonempty("KEYSTONE_JML_SERVICE_TOKEN");
+        config.assurance_service_token = env_nonempty("KEYSTONE_ASSURANCE_SERVICE_TOKEN");
+        config.assurance_previous_service_token =
+            env_nonempty("KEYSTONE_ASSURANCE_PREVIOUS_SERVICE_TOKEN");
+        config.registration_mac_kid = env_nonempty("KEYSTONE_REGISTRATION_MAC_KID");
+        config.registration_mac_key = env_nonempty("KEYSTONE_REGISTRATION_MAC_KEY");
+        config.registration_previous_mac_kid = env_nonempty("KEYSTONE_REGISTRATION_MAC_KID_PREV");
+        config.registration_previous_mac_key = env_nonempty("KEYSTONE_REGISTRATION_MAC_KEY_PREV");
         // Internal mTLS (default OFF). Only `on` (case-insensitive) enables it.
         config.internal_tls = std::env::var("INTERNAL_TLS")
             .map(|v| v.eq_ignore_ascii_case("on"))
@@ -305,5 +342,6 @@ pub fn seed_user() -> User {
         // Operator account: admin out of the box so `/admin` is reachable from day one.
         is_admin: true,
         disabled: false,
+        factor_epoch: 0,
     }
 }

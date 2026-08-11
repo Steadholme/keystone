@@ -33,7 +33,8 @@ pub async fn userinfo(
         .store
         .get_user(&data.claims.sub)
         .await
-        .ok_or_else(|| AppError::Unauthorized("subject not found".to_string()))?;
+        .filter(|user| !user.disabled)
+        .ok_or_else(|| AppError::Unauthorized("subject unavailable".to_string()))?;
 
     Ok(Json(json!({
         "sub": user.sub,

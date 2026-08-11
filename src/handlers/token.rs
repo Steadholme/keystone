@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::audit::AuditEvent;
 use crate::auth;
 use crate::error::AppError;
+use crate::handlers::authorize::{fresh_strong_assurance, STRONG_ACR};
 use crate::{jwt, now_secs, pkce, AppState};
 
 #[derive(Debug, Deserialize)]
@@ -105,14 +106,29 @@ pub async fn token(
 
     // --- Authorization-code grant ----------------------------------------------
     // Single-use consume: removal makes replay -> invalid_grant by construction.
-    let auth_code = state
+    let redeem_now = now_secs();
+    let redeemed = state
         .store
-        .take_code(&params.code)
+        .redeem_code(&params.code, redeem_now)
         .await
+        .map_err(|_| AppError::Internal("authorization state unavailable".to_string()))?
         .ok_or_else(|| AppError::InvalidGrant("unknown or already-used code".to_string()))?;
+    // Re-sample after the store's lifecycle/session linearization point. The store-provided
+    // timestamp is a lower bound captured only after all authoritative locks were held, so a
+    // request queued behind a long-running lifecycle transaction cannot reuse stale MFA.
+    let decision_now = now_secs().max(redeemed.validated_at);
+    if redeemed
+        .session_expires_at
+        .is_some_and(|expires_at| decision_now > expires_at)
+    {
+        return Err(AppError::InvalidGrant(
+            "authorization session expired".to_string(),
+        ));
+    }
+    let auth_code = redeemed.code;
 
     // Expiry.
-    if now_secs() > auth_code.expires_at {
+    if decision_now > auth_code.expires_at {
         return Err(AppError::InvalidGrant(
             "authorization code expired".to_string(),
         ));
@@ -133,12 +149,22 @@ pub async fn token(
         ));
     }
 
-    // Resolve the approved user for the id_token email claim.
-    let user = state
-        .store
-        .get_user(&auth_code.sub)
-        .await
-        .ok_or_else(|| AppError::Internal("approved subject not found".to_string()))?;
+    // The store consumed the code and verified the bound session/user/factor tuple at one
+    // linearization point. Only legacy codes return `assurance=None`.
+    let user = redeemed.user;
+    match auth_code.required_acr.as_deref() {
+        None => {}
+        Some(STRONG_ACR)
+            if redeemed
+                .assurance
+                .as_ref()
+                .is_some_and(|value| fresh_strong_assurance(value, decision_now)) => {}
+        Some(_) => {
+            return Err(AppError::InvalidGrant(
+                "required authentication assurance is not satisfied".to_string(),
+            ))
+        }
+    }
 
     let access_token = jwt::sign_access(
         &state.keys,
@@ -159,6 +185,7 @@ pub async fn token(
         &auth_code.scope,
         &user.email,
         auth_code.nonce.clone(),
+        redeemed.assurance.as_ref(),
     )
     .map_err(|e| AppError::Internal(format!("sign id_token: {e}")))?;
 

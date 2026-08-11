@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::keys::SigningKey;
 use crate::now_secs;
+use crate::store::{AssuranceLevel, SessionAssurance};
 
 /// access_token claims.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +35,22 @@ pub struct IdTokenClaims {
     pub email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amr: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hf_mfa: Option<MfaClaim>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MfaClaim {
+    pub aal: String,
+    pub uv: bool,
+    pub sb: String,
+    pub fe: u64,
 }
 
 fn rs256_header(keys: &SigningKey) -> Header {
@@ -72,8 +89,34 @@ pub fn sign_id(
     scope: &str,
     email: &str,
     nonce: Option<String>,
+    assurance: Option<&SessionAssurance>,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let iat = now_secs();
+    let (auth_time, acr, amr, hf_mfa) = match assurance {
+        None => (None, None, None, None),
+        Some(value) if value.aal == AssuranceLevel::MfaStrong => (
+            Some(value.auth_time),
+            Some("hf-aal-strong".to_string()),
+            Some(value.amr.split(',').map(str::to_string).collect()),
+            Some(MfaClaim {
+                aal: value.aal.as_str().to_string(),
+                uv: value.uv,
+                sb: value.session_binding.clone(),
+                fe: value.factor_epoch,
+            }),
+        ),
+        Some(_) => (
+            Some(0),
+            Some("hf-aal-none".to_string()),
+            Some(Vec::new()),
+            Some(MfaClaim {
+                aal: AssuranceLevel::AalNone.as_str().to_string(),
+                uv: false,
+                sb: String::new(),
+                fe: 0,
+            }),
+        ),
+    };
     let claims = IdTokenClaims {
         iss: config.issuer.clone(),
         sub: sub.to_string(),
@@ -83,6 +126,10 @@ pub fn sign_id(
         scope: scope.to_string(),
         email: email.to_string(),
         nonce,
+        auth_time,
+        acr,
+        amr,
+        hf_mfa,
     };
     encode(&rs256_header(keys), &claims, &keys.enc)
 }
@@ -127,6 +174,7 @@ mod tests {
             "openid email",
             "admin@steadholme.local",
             Some("n-123".to_string()),
+            None,
         )
         .unwrap();
 
@@ -138,5 +186,6 @@ mod tests {
         let data = decode::<IdTokenClaims>(&token, &decoding, &validation).unwrap();
         assert_eq!(data.claims.email, "admin@steadholme.local");
         assert_eq!(data.claims.nonce.as_deref(), Some("n-123"));
+        assert!(data.claims.hf_mfa.is_none());
     }
 }

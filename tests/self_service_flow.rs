@@ -103,8 +103,14 @@ async fn register_verify_login_flow() {
         .await
         .expect("registered user present");
     assert!(!user.email_verified, "new user starts unverified");
-    assert!(user.created_at > 0, "self-service user carries a created_at");
-    assert!(user.sub.starts_with("usr_"), "opaque sub, no collision with u_*");
+    assert!(
+        user.created_at > 0,
+        "self-service user carries a created_at"
+    );
+    assert!(
+        user.sub.starts_with("usr_"),
+        "opaque sub, no collision with u_*"
+    );
 
     // 2. Login is BLOCKED until the email is verified.
     let (csrf, cookie) = csrf_from(&state, "/login").await;
@@ -117,8 +123,15 @@ async fn register_verify_login_flow() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "unverified login is rejected");
-    assert!(cookie_value(&headers, "__Host-session").is_none(), "no session granted");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "unverified login is rejected"
+    );
+    assert!(
+        cookie_value(&headers, "__Host-session").is_none(),
+        "no session granted"
+    );
     assert!(body_str(&body).to_lowercase().contains("verify your email"));
 
     // 3. Plant + consume a verification token through the real /verify handler.
@@ -131,16 +144,27 @@ async fn register_verify_login_flow() {
             kind: "verify".to_string(),
             expires_at: now_secs() + 3600,
         })
-        .await;
+        .await
+        .expect("persist expired verification token");
     let (status, _, body) = call(&state, get(&format!("/verify?token={token}"))).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body_str(&body).contains("Email verified"));
     assert!(
-        state.store.get_user(&user.sub).await.unwrap().email_verified,
+        state
+            .store
+            .get_user(&user.sub)
+            .await
+            .unwrap()
+            .email_verified,
         "verify flipped the flag"
     );
     // Single-use: the token is gone.
-    assert!(state.store.take_verification_token(token).await.is_none());
+    assert!(state
+        .store
+        .take_verification_token(token)
+        .await
+        .expect("inspect consumed verification token")
+        .is_none());
 
     // 4. Login now succeeds and yields a session.
     let (csrf, cookie) = csrf_from(&state, "/login").await;
@@ -170,13 +194,21 @@ async fn forgot_is_neutral_and_reset_rotates_password() {
         .create_user("usr_reset", EMAIL, &hash, now_secs())
         .await
         .expect("create user");
-    state.store.set_email_verified("usr_reset").await;
+    state
+        .store
+        .set_email_verified("usr_reset")
+        .await
+        .expect("verify reset user");
 
     // /forgot for a real email AND a nonexistent one return the SAME neutral 200 (no enumeration).
     let (csrf, cookie) = csrf_from(&state, "/forgot").await;
     let (status_real, _, body_real) = call(
         &state,
-        post_form("/forgot", Some(&cookie), format!("email={EMAIL}&csrf_token={csrf}")),
+        post_form(
+            "/forgot",
+            Some(&cookie),
+            format!("email={EMAIL}&csrf_token={csrf}"),
+        ),
     )
     .await;
     let (csrf, cookie) = csrf_from(&state, "/forgot").await;
@@ -207,7 +239,8 @@ async fn forgot_is_neutral_and_reset_rotates_password() {
             kind: "reset".to_string(),
             expires_at: now_secs() + 3600,
         })
-        .await;
+        .await
+        .expect("persist reset token");
     let (csrf, cookie) = csrf_from(&state, &format!("/reset?token={token}")).await;
     let (status, _, body) = call(
         &state,
@@ -227,7 +260,12 @@ async fn forgot_is_neutral_and_reset_rotates_password() {
     assert!(keystone::auth::verify_password(NEW_PASSWORD, &phc));
     assert!(!keystone::auth::verify_password(PASSWORD, &phc));
     // Reset token is single-use.
-    assert!(state.store.take_verification_token(token).await.is_none());
+    assert!(state
+        .store
+        .take_verification_token(token)
+        .await
+        .expect("inspect consumed reset token")
+        .is_none());
 }
 
 #[tokio::test]
@@ -239,8 +277,13 @@ async fn change_password_requires_correct_current_password() {
         .create_user("usr_chg", EMAIL, &hash, now_secs())
         .await
         .unwrap();
-    state.store.set_email_verified("usr_chg").await;
-    let session = keystone::auth::create_session(&state, "usr_chg", "test-agent", "127.0.0.1").await;
+    state
+        .store
+        .set_email_verified("usr_chg")
+        .await
+        .expect("verify password-change user");
+    let session =
+        keystone::auth::create_session(&state, "usr_chg", "test-agent", "127.0.0.1").await;
     let session_cookie = format!("__Host-session={session}");
 
     // Grab a CSRF token from the authenticated account page.
@@ -261,8 +304,17 @@ async fn change_password_requires_correct_current_password() {
     assert_eq!(status, StatusCode::OK);
     // Note: the notice title "Couldn't…" is HTML-escaped, so assert on the (apostrophe-free) body.
     assert!(body_str(&body).contains("current password is incorrect"));
-    let phc = state.store.get_user("usr_chg").await.unwrap().password_hash.unwrap();
-    assert!(keystone::auth::verify_password(PASSWORD, &phc), "old password still valid");
+    let phc = state
+        .store
+        .get_user("usr_chg")
+        .await
+        .unwrap()
+        .password_hash
+        .unwrap();
+    assert!(
+        keystone::auth::verify_password(PASSWORD, &phc),
+        "old password still valid"
+    );
 
     // Correct current password -> rotated.
     let (status, _, body) = call(
@@ -276,6 +328,12 @@ async fn change_password_requires_correct_current_password() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body_str(&body).contains("Password updated"));
-    let phc = state.store.get_user("usr_chg").await.unwrap().password_hash.unwrap();
+    let phc = state
+        .store
+        .get_user("usr_chg")
+        .await
+        .unwrap()
+        .password_hash
+        .unwrap();
     assert!(keystone::auth::verify_password(NEW_PASSWORD, &phc));
 }

@@ -14,7 +14,7 @@ use base64::Engine;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
-use crate::store::{new_opaque_code, Session};
+use crate::store::{new_opaque_code, AssuranceLevel, Session};
 use crate::{now_secs, AppState};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -102,21 +102,124 @@ pub fn verify_signed(secret: &str, value: &str) -> Option<String> {
 // Sessions
 // ---------------------------------------------------------------------------
 
-/// Create + persist a session for `user_sub`; returns the signed cookie value.
+/// Create + persist a session for `user_sub`; returns the signed cookie value only while
+/// the authoritative user still exists and is enabled.
 ///
 /// `user_agent`/`ip` are captured for the session-management UI (best-effort device labels);
 /// pass empty strings when unavailable. `last_seen` starts at the creation time.
-pub async fn create_session(
+pub async fn try_create_session(
     state: &AppState,
     user_sub: &str,
     user_agent: &str,
     ip: &str,
-) -> String {
+) -> Option<String> {
+    try_create_session_with_assurance(
+        state,
+        user_sub,
+        user_agent,
+        ip,
+        AssuranceLevel::AalNone,
+        false,
+        "",
+    )
+    .await
+}
+
+/// Create a session carrying server-proven assurance. Callers may request
+/// `MFA_STRONG` only immediately after a qualifying ceremony.
+pub async fn try_create_session_with_assurance(
+    state: &AppState,
+    user_sub: &str,
+    user_agent: &str,
+    ip: &str,
+    aal: AssuranceLevel,
+    uv: bool,
+    amr: &str,
+) -> Option<String> {
+    try_create_session_with_assurance_inner(
+        state,
+        user_sub,
+        user_agent,
+        ip,
+        AssuranceGrant {
+            aal,
+            uv,
+            amr,
+            expected_factor_epoch: None,
+        },
+    )
+    .await
+}
+
+/// Create a strong session only if the subject is still on the exact factor generation at
+/// which a qualifying ceremony was atomically accepted. This closes the reset-between-verify-
+/// and-session race for TOTP without holding a database transaction across handler work.
+pub async fn try_create_strong_session_at_epoch(
+    state: &AppState,
+    user_sub: &str,
+    user_agent: &str,
+    ip: &str,
+    uv: bool,
+    amr: &str,
+    expected_factor_epoch: u64,
+) -> Option<String> {
+    try_create_session_with_assurance_inner(
+        state,
+        user_sub,
+        user_agent,
+        ip,
+        AssuranceGrant {
+            aal: AssuranceLevel::MfaStrong,
+            uv,
+            amr,
+            expected_factor_epoch: Some(expected_factor_epoch),
+        },
+    )
+    .await
+}
+
+struct AssuranceGrant<'a> {
+    aal: AssuranceLevel,
+    uv: bool,
+    amr: &'a str,
+    expected_factor_epoch: Option<u64>,
+}
+
+async fn try_create_session_with_assurance_inner(
+    state: &AppState,
+    user_sub: &str,
+    user_agent: &str,
+    ip: &str,
+    grant: AssuranceGrant<'_>,
+) -> Option<String> {
+    let AssuranceGrant {
+        aal,
+        uv,
+        amr,
+        expected_factor_epoch,
+    } = grant;
+    let user = state.store.get_user(user_sub).await?;
+    if user.disabled || expected_factor_epoch.is_some_and(|expected| expected != user.factor_epoch)
+    {
+        return None;
+    }
+    let valid_assurance = match aal {
+        AssuranceLevel::AalNone => !uv && amr.is_empty(),
+        AssuranceLevel::MfaStrong => matches!(amr, "pwd,otp" | "hwk,user"),
+    };
+    if !valid_assurance {
+        return None;
+    }
     let id = new_opaque_code();
     let now = now_secs();
-    state
+    let auth_time = if aal == AssuranceLevel::MfaStrong {
+        now
+    } else {
+        0
+    };
+    let persisted = state
         .store
-        .put_session(Session {
+        .put_session_if_active(Session {
             id: id.clone(),
             user_sub: user_sub.to_string(),
             created_at: now,
@@ -124,9 +227,40 @@ pub async fn create_session(
             user_agent: user_agent.to_string(),
             ip: ip.to_string(),
             last_seen: now,
+            session_binding: Some(session_binding(&id)),
+            aal,
+            uv,
+            auth_time,
+            amr: amr.to_string(),
+            factor_epoch: expected_factor_epoch.unwrap_or(user.factor_epoch),
         })
-        .await;
-    signed_value(&state.config.session_secret, &id)
+        .await
+        .ok()?;
+    if !persisted {
+        return None;
+    }
+    Some(signed_value(&state.config.session_secret, &id))
+}
+
+/// Public, non-bearer identifier used to bind assurance to one server-side session.
+pub fn session_binding(session_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"holdfast.keystone.session-binding.v1\n");
+    digest.update(session_id.as_bytes());
+    lower_hex(&digest.finalize())
+}
+
+/// Backward-compatible test/helper seam. A rejected write returns an empty, unusable cookie;
+/// request handlers use [`try_create_session`] so they can surface the denial explicitly.
+pub async fn create_session(
+    state: &AppState,
+    user_sub: &str,
+    user_agent: &str,
+    ip: &str,
+) -> String {
+    try_create_session(state, user_sub, user_agent, ip)
+        .await
+        .unwrap_or_default()
 }
 
 /// Resolve the current (unexpired) session from the request cookies, if any.
@@ -137,6 +271,17 @@ pub async fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Se
     let session = state.store.get_session(&id).await?;
     let now = now_secs();
     if now > session.expires_at {
+        state.store.delete_session(&id).await;
+        return None;
+    }
+    // A session row is never sufficient authority by itself. Re-resolve the owner on every
+    // request so account disablement, deletion, and store failures fail closed immediately.
+    let active_user = state
+        .store
+        .get_user(&session.user_sub)
+        .await
+        .is_some_and(|user| !user.disabled);
+    if !active_user {
         state.store.delete_session(&id).await;
         return None;
     }
@@ -220,8 +365,12 @@ pub fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
 /// never log either the plaintext or this hash.
 pub fn secret_hash(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
-    let mut out = String::with_capacity(digest.len() * 2);
-    for b in digest {
+    lower_hex(&digest)
+}
+
+fn lower_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
         use std::fmt::Write as _;
         write!(&mut out, "{b:02x}").expect("writing to String cannot fail");
     }
@@ -276,6 +425,14 @@ mod tests {
         assert!(verify_signed(secret, &tampered).is_none());
         // Wrong secret is rejected.
         assert!(verify_signed("other-secret", &signed).is_none());
+    }
+
+    #[test]
+    fn session_binding_matches_cross_language_golden_vector() {
+        assert_eq!(
+            session_binding("sess_TESTVECTOR_0001"),
+            "1e0007c3bba79f5c4f0c6f61e4081ed08ed2e1698268a86eaf96ebe903dd4b7f"
+        );
     }
 
     #[test]
