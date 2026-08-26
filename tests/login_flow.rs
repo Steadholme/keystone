@@ -158,6 +158,71 @@ async fn authorize_without_session_redirects_to_login() {
 }
 
 #[tokio::test]
+async fn factor_epoch_change_requires_reauthentication_before_authorize() {
+    let state = keystone::build_dev_state();
+    let session = keystone::auth::try_create_session(&state, "u_admin", "test-agent", "127.0.0.1")
+        .await
+        .expect("active user session");
+    let session_id = keystone::auth::verify_signed(&state.config.session_secret, &session)
+        .expect("signed session id");
+    let session_cookie = format!("__Host-session={session}");
+    let mut session_headers = HeaderMap::new();
+    session_headers.insert(header::COOKIE, session_cookie.parse().unwrap());
+
+    assert!(
+        keystone::auth::current_session(&state, &session_headers)
+            .await
+            .is_some(),
+        "session is current before the factor generation changes"
+    );
+    state
+        .store
+        .bump_factor_epoch("u_admin")
+        .await
+        .expect("factor epoch bump");
+
+    assert!(
+        keystone::auth::current_session(&state, &session_headers)
+            .await
+            .is_some(),
+        "factor enrollment may continue on the base account session"
+    );
+    assert!(
+        state.store.get_session(&session_id).await.is_some(),
+        "base session remains until it reaches the OIDC authority gate"
+    );
+
+    let (status, headers, _) =
+        call(&state, get_with_cookie(&authorize_uri(), &session_cookie)).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(
+        location(&headers).starts_with("/login?return_to="),
+        "stale session must not mint an authorization code"
+    );
+    assert!(
+        state.store.get_session(&session_id).await.is_none(),
+        "the OIDC authority gate deletes the stale session"
+    );
+
+    let current_session =
+        keystone::auth::try_create_session(&state, "u_admin", "fresh-agent", "127.0.0.1")
+            .await
+            .expect("current factor generation session");
+    let (status, headers, _) = call(
+        &state,
+        get_with_cookie(
+            &authorize_uri(),
+            &format!("__Host-session={current_session}"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    let location = location(&headers);
+    assert!(location.starts_with(REDIRECT_URI), "got {location}");
+    assert!(!code_from(&location).is_empty());
+}
+
+#[tokio::test]
 async fn password_login_creates_session_then_oidc_flow() {
     let state = keystone::build_dev_state();
     // Seed the admin password (mirrors the BOOTSTRAP_ADMIN_PASSWORD startup path).

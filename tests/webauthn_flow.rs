@@ -71,6 +71,8 @@ async fn passkey_register_then_authenticate_end_to_end() {
     // --- Registration (session-protected) ----------------------------------
     let session =
         keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
+    let session_id = keystone::auth::verify_signed(&state.config.session_secret, &session)
+        .expect("signed session id");
     let reg_cookie = format!("__Host-session={session}; __Host-csrf={CSRF}");
 
     let (status, headers, body) = call(
@@ -115,7 +117,8 @@ async fn passkey_register_then_authenticate_end_to_end() {
         "one passkey stored"
     );
 
-    // --- On-demand strong step-up stays bound to the current weak session --
+    // Registration bumps the factor epoch. The base account session may finish enrollment, but
+    // it cannot carry stale assurance into OIDC and is deleted at the authorize gate.
     let strong_authorize_uri = "/authorize?response_type=code&client_id=sluice-dev\
          &redirect_uri=http://127.0.0.1:9090/callback&scope=openid+email&state=step-up\
          &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256\
@@ -137,6 +140,35 @@ async fn passkey_register_then_authenticate_end_to_end() {
         .unwrap()
         .to_string();
     assert!(login_location.starts_with("/login?return_to="));
+    assert!(
+        !login_location.contains("&step_up="),
+        "stale assurance must not start a bound step-up flow"
+    );
+    assert!(
+        state.store.get_session(&session_id).await.is_none(),
+        "the OIDC gate deletes the stale enrollment session"
+    );
+
+    // --- On-demand strong step-up stays bound to a current weak session ----
+    let step_up_session =
+        keystone::auth::create_session(&state, "u_admin", "test-agent", "127.0.0.1").await;
+    let (status, headers, _) = call(
+        &state,
+        Request::builder()
+            .uri(strong_authorize_uri)
+            .header(header::COOKIE, format!("__Host-session={step_up_session}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    let login_location = headers
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(login_location.starts_with("/login?return_to="));
     let step_up_id = login_location
         .split('&')
         .find_map(|pair| pair.strip_prefix("step_up="))
@@ -146,14 +178,14 @@ async fn passkey_register_then_authenticate_end_to_end() {
         &state,
         Request::builder()
             .uri(&login_location)
-            .header(header::COOKIE, format!("__Host-session={session}"))
+            .header(header::COOKIE, format!("__Host-session={step_up_session}"))
             .body(Body::empty())
             .unwrap(),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let step_up_csrf = cookie_value(&headers, "__Host-csrf").unwrap();
-    let step_up_cookie = format!("__Host-session={session}; __Host-csrf={step_up_csrf}");
+    let step_up_cookie = format!("__Host-session={step_up_session}; __Host-csrf={step_up_csrf}");
     let begin_body = serde_json::to_vec(&serde_json::json!({
         "username": "a-browser-value-cannot-switch-the-subject",
         "return_to": strong_authorize_uri,
@@ -176,8 +208,9 @@ async fn passkey_register_then_authenticate_end_to_end() {
     let pkc = authenticator
         .do_authentication(origin.clone(), rcr)
         .expect("SoftPasskey step-up authentication");
-    let finish_cookie =
-        format!("__Host-session={session}; __Host-csrf={step_up_csrf}; __Host-wa={wa_step_up}");
+    let finish_cookie = format!(
+        "__Host-session={step_up_session}; __Host-csrf={step_up_csrf}; __Host-wa={wa_step_up}"
+    );
     let (status, headers, body) = call(
         &state,
         json_post_with_csrf(
@@ -196,7 +229,7 @@ async fn passkey_register_then_authenticate_end_to_end() {
     );
     let stepped_up_session =
         cookie_value(&headers, "__Host-session").expect("step-up minted a new strong session");
-    assert_ne!(stepped_up_session, session);
+    assert_ne!(stepped_up_session, step_up_session);
     let (status, headers, _) = call(
         &state,
         Request::builder()

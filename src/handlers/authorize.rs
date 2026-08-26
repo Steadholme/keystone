@@ -79,15 +79,14 @@ pub async fn authorize(
 
     // Step 5. GATE: require a valid login session. No session -> bounce to /login carrying the
     // full /authorize request (path + query) as a same-origin return_to.
-    let session = match auth::current_session(&state, &headers).await {
+    let session = match current_oidc_session(&state, &headers).await {
         Some(session) => session,
         None => {
             let return_to = original_uri
                 .path_and_query()
                 .map(|pq| pq.as_str())
                 .unwrap_or("/authorize");
-            let location = format!("/login?return_to={}", urlencode_component(return_to));
-            return Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response());
+            return Ok(login_redirect(return_to));
         }
     };
 
@@ -173,15 +172,11 @@ pub async fn consent_submit(
         ));
     }
 
-    let session = match auth::current_session(&state, &headers).await {
+    let session = match current_oidc_session(&state, &headers).await {
         Some(session) => session,
         None => {
             // Session expired mid-consent — send them back through the login gate.
-            let location = format!(
-                "/login?return_to={}",
-                urlencode_component(&authorize_url(&params))
-            );
-            return Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response());
+            return Ok(login_redirect(&authorize_url(&params)));
         }
     };
 
@@ -232,6 +227,35 @@ pub async fn consent_submit(
 // ---------------------------------------------------------------------------
 // Shared validation + code issuance
 // ---------------------------------------------------------------------------
+
+/// Resolve a base account session and require its factor generation to remain authoritative for
+/// OIDC. Factor enrollment may continue on a base session after bumping the epoch, but that stale
+/// assurance can never mint an authorization code.
+async fn current_oidc_session(state: &AppState, headers: &HeaderMap) -> Option<Session> {
+    let session = auth::current_session(state, headers).await?;
+    oidc_session_is_authoritative(state, &session)
+        .await
+        .then_some(session)
+}
+
+/// Re-check the authoritative factor generation immediately before an OIDC authority decision.
+/// A stale session is deleted so the next request cannot repeatedly present obsolete assurance.
+async fn oidc_session_is_authoritative(state: &AppState, session: &Session) -> bool {
+    let authoritative = state
+        .store
+        .get_user(&session.user_sub)
+        .await
+        .is_some_and(|user| !user.disabled && user.factor_epoch == session.factor_epoch);
+    if !authoritative {
+        state.store.delete_session(&session.id).await;
+    }
+    authoritative
+}
+
+fn login_redirect(return_to: &str) -> Response {
+    let location = format!("/login?return_to={}", urlencode_component(return_to));
+    (StatusCode::FOUND, [(header::LOCATION, location)]).into_response()
+}
 
 /// Steps 1–4: the client/redirect/response_type/PKCE checks shared by GET authorize and the
 /// consent POST. Returns the resolved client and the validated `code_challenge`.
@@ -289,6 +313,9 @@ async fn issue_code(
     session: &Session,
     required_acr: RequiredAcr,
 ) -> Result<Response, AppError> {
+    if !oidc_session_is_authoritative(state, session).await {
+        return Ok(login_redirect(&authorize_url(params)));
+    }
     // Re-check immediately before the code snapshot is persisted. `/token` repeats the same
     // closed-ACR/freshness check after atomically redeeming the bound code.
     if required_acr == RequiredAcr::Strong && !authoritative_fresh_strong(state, session).await? {

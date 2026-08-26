@@ -188,6 +188,51 @@ async fn third_party_consent_deny_then_approve_then_remembered() {
 }
 
 #[tokio::test]
+async fn factor_epoch_change_mid_consent_requires_reauthentication() {
+    let state = keystone::build_dev_state();
+    seed_third_party(&state).await;
+    let session = keystone::auth::create_session(&state, "u_admin", "ua", "ip").await;
+    let session_id = keystone::auth::verify_signed(&state.config.session_secret, &session)
+        .expect("signed session id");
+    let session_cookie = format!("__Host-session={session}");
+
+    let (status, headers, body) = call(
+        &state,
+        get_with_cookie(&authorize_uri(TP_ID, TP_REDIRECT), &session_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    let csrf = cookie_value(&headers, "__Host-csrf").expect("consent issues csrf");
+    let acr_binding = hidden_value(&html, "acr_binding");
+
+    state
+        .store
+        .bump_factor_epoch("u_admin")
+        .await
+        .expect("factor epoch bump");
+    let (status, headers, _) = call(
+        &state,
+        consent_post("approve", &csrf, &acr_binding, &session),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(
+        location(&headers).starts_with("/login?return_to="),
+        "stale consent session must return through login"
+    );
+    assert!(
+        state.store.get_consent("u_admin", TP_ID).await.is_none(),
+        "stale consent is not persisted"
+    );
+    assert!(
+        state.store.get_session(&session_id).await.is_none(),
+        "the stale consent session is deleted"
+    );
+}
+
+#[tokio::test]
 async fn consent_requires_csrf() {
     let state = keystone::build_dev_state();
     seed_third_party(&state).await;
