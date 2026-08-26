@@ -103,6 +103,39 @@ TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:55432/keystone \
 docker rm -f ks-testpg
 ```
 
+## Service principal 离线管理
+
+非人类调用方使用独立的 `service:<slug>` principal，不进入 `users` 表，因此没有 email、密码、
+Passkey、浏览器 SSO、session 或账号恢复入口。初次创建只建立 principal，默认不附带 credential，
+也不隐含任何授权；授权系统需要另行按最小权限授予明确的资源 scope。
+
+管理命令直接连接 `DATABASE_URL`，不会启动 HTTP 服务，也不会隐式运行 schema migration。
+部署必须先完成显式迁移。每次操作都必须传入可审计的 `--actor`，不从环境猜测操作者身份：
+
+```bash
+keystone service-principal create \
+  --slug <service-slug> --display-name <display-name> --actor <operator-or-change-id>
+
+keystone service-principal disable \
+  --slug <service-slug> --actor <operator-or-change-id>
+```
+
+本次生产 operator 只开放 `create` 与 `disable`。credential 发放、轮换和撤销会在 Rikune 集成阶段
+连同 secret manager 交付链路一起设计；当前 CLI 不提供相关入口。重复创建会明确报
+`service principal already exists; no change`；重复禁用会明确返回
+`service principal was already disabled; no change`，不会把 no-op 伪装成一次新变更。
+
+架构约束如下：
+
+- system principal 与 human user 使用结构隔离的数据模型，不进入 email、密码、Passkey、浏览器 SSO、
+  session 或账号恢复链路，也不能计入 human approval。
+- 首个 estate-wide bootstrap system principal 必须保持零 credential、零 grant；它只建立身份锚点，
+  默认无权访问任何资源。
+- Rikune 集成完成后，每个应用建立独立 principal，按最小权限分别授权；禁止多个应用长期共享同一
+  credential。
+- credential surface 只有在实现并验证 `pending → secure deliver → active` 生命周期后才允许上线，
+  避免交付失败时留下调用方未知但仍 active 的 bearer credential。
+
 ## Docker
 
 ```bash

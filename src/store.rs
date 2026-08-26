@@ -11,7 +11,7 @@
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
-#[cfg(test)]
+#[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -253,6 +253,45 @@ fn sha256_hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+fn valid_service_principal_slug(slug: &str) -> bool {
+    let bytes = slug.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 63
+        && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+}
+
+fn valid_service_principal_label(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && trimmed.len() <= 200 && !trimmed.chars().any(char::is_control)
+}
+
+/// Service-principal timestamps are persisted in PostgreSQL `BIGINT` columns. Keep the
+/// in-memory authority on the same domain so switching backends cannot change whether a
+/// mutation or lookup is accepted at the signed boundary.
+const SERVICE_PRINCIPAL_MAX_TIMESTAMP: u64 = i64::MAX as u64;
+
+fn valid_service_principal_occurred_at(value: u64) -> bool {
+    value != 0 && value <= SERVICE_PRINCIPAL_MAX_TIMESTAMP
+}
+
+fn canonical_service_principal_subject(slug: &str) -> String {
+    format!("service:{slug}")
+}
+
+fn new_prefixed_random(prefix: &str, byte_count: usize) -> String {
+    let mut bytes = vec![0u8; byte_count];
+    OsRng.fill_bytes(&mut bytes);
+    format!("{prefix}{}", URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn new_service_principal_event_id() -> String {
+    new_prefixed_random("spe_", 18)
 }
 
 fn canonical_registration_subject(raw_sub: &str) -> String {
@@ -591,6 +630,72 @@ pub struct PersonalAccessToken {
     pub revoked_at: u64,
 }
 
+/// A non-human identity used only by trusted internal callers. Service principals are
+/// deliberately separate from [`User`]: they have no email, password, browser session,
+/// recovery flow, or Passkey surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServicePrincipal {
+    /// Stable lowercase operator-facing identifier.
+    pub slug: String,
+    /// Canonical authorization subject (`service:<slug>`).
+    pub subject: String,
+    pub display_name: String,
+    pub disabled: bool,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Immutable service-principal audit actions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServicePrincipalEventAction {
+    Created,
+    Disabled,
+    Enabled,
+}
+
+impl ServicePrincipalEventAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Disabled => "disabled",
+            Self::Enabled => "enabled",
+        }
+    }
+
+    fn from_db(value: &str) -> Option<Self> {
+        match value {
+            "created" => Some(Self::Created),
+            "disabled" => Some(Self::Disabled),
+            "enabled" => Some(Self::Enabled),
+            _ => None,
+        }
+    }
+}
+
+/// One durable audit event committed at the same linearization point as its mutation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServicePrincipalEvent {
+    pub id: String,
+    pub principal_slug: String,
+    /// Faithful per-principal commit order, starting at one. Wall-clock timestamps are
+    /// intentionally not used to reconstruct mutation order.
+    pub sequence: u64,
+    pub subject: String,
+    pub action: ServicePrincipalEventAction,
+    pub actor: String,
+    pub occurred_at: u64,
+}
+
+/// Stable service-principal outcomes so operator and internal HTTP layers can fail closed
+/// without interpreting backend-specific errors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServicePrincipalError {
+    Invalid,
+    AlreadyExists,
+    NotFound,
+    Backend,
+}
+
 /// Short-lived server-side state for an in-flight WebAuthn ceremony. `state` is the
 /// serde-JSON of `PasskeyRegistration` or `PasskeyAuthentication`; `kind` is `"reg"`/`"auth"`.
 #[derive(Clone, Debug)]
@@ -869,6 +974,31 @@ pub trait Store: Send + Sync {
         revoked_at: u64,
     ) -> Result<(), StoreError>;
 
+    /// Create an enabled service principal with no credentials. The creation event and row
+    /// must commit atomically.
+    async fn create_service_principal(
+        &self,
+        slug: &str,
+        display_name: &str,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<ServicePrincipal, ServicePrincipalError>;
+    async fn get_service_principal(
+        &self,
+        slug: &str,
+    ) -> Result<Option<ServicePrincipal>, StoreError>;
+    async fn set_service_principal_disabled(
+        &self,
+        slug: &str,
+        disabled: bool,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<bool, ServicePrincipalError>;
+    async fn list_service_principal_events(
+        &self,
+        slug: &str,
+    ) -> Result<Vec<ServicePrincipalEvent>, StoreError>;
+
     async fn put_state(&self, state: WebauthnState);
     /// Atomically remove and return ceremony state (single-use); `None` if absent.
     async fn take_state(&self, id: &str) -> Option<WebauthnState>;
@@ -916,6 +1046,13 @@ impl Default for InMemoryRegistrationAuthority {
     }
 }
 
+#[derive(Default)]
+struct InMemoryServicePrincipalAuthority {
+    principals: HashMap<String, ServicePrincipal>,
+    events: Vec<ServicePrincipalEvent>,
+    next_event_sequence: HashMap<String, u64>,
+}
+
 /// In-memory `Store`. `std::sync::Mutex<HashMap>` — no async lock needed.
 #[derive(Default)]
 pub struct InMemoryStore {
@@ -937,6 +1074,11 @@ pub struct InMemoryStore {
     fail_personal_token_put: AtomicBool,
     #[cfg(test)]
     fail_personal_token_revoke: AtomicBool,
+    service_principals: Mutex<InMemoryServicePrincipalAuthority>,
+    /// Debug-build-only one-shot event sink failure used to prove mutation rollback. It is
+    /// absent from release binaries and never accepts secret material.
+    #[cfg(debug_assertions)]
+    fail_next_service_principal_event: AtomicBool,
     states: Mutex<HashMap<String, WebauthnState>>,
     verification_tokens: Mutex<HashMap<String, VerificationToken>>,
     registration: Mutex<InMemoryRegistrationAuthority>,
@@ -989,6 +1131,54 @@ impl InMemoryStore {
         self.fail_personal_token_put.store(put, Ordering::SeqCst);
         self.fail_personal_token_revoke
             .store(revoke, Ordering::SeqCst);
+    }
+
+    /// Test support for the service-principal transactional boundary. Available only in
+    /// debug builds (including integration tests), never in production release binaries.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub fn fail_next_service_principal_event_for_test(&self) {
+        self.fail_next_service_principal_event
+            .store(true, Ordering::SeqCst);
+    }
+
+    fn append_service_principal_event_memory(
+        &self,
+        authority: &mut InMemoryServicePrincipalAuthority,
+        principal_slug: &str,
+        action: ServicePrincipalEventAction,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<ServicePrincipalEvent, ServicePrincipalError> {
+        #[cfg(debug_assertions)]
+        if self
+            .fail_next_service_principal_event
+            .swap(false, Ordering::SeqCst)
+        {
+            return Err(ServicePrincipalError::Backend);
+        }
+        let sequence = authority
+            .next_event_sequence
+            .get(principal_slug)
+            .copied()
+            .unwrap_or(1);
+        let next_sequence = sequence
+            .checked_add(1)
+            .ok_or(ServicePrincipalError::Backend)?;
+        let event = ServicePrincipalEvent {
+            id: new_service_principal_event_id(),
+            principal_slug: principal_slug.to_string(),
+            sequence,
+            subject: canonical_service_principal_subject(principal_slug),
+            action,
+            actor: actor.to_string(),
+            occurred_at,
+        };
+        authority.events.push(event.clone());
+        authority
+            .next_event_sequence
+            .insert(principal_slug.to_string(), next_sequence);
+        Ok(event)
     }
 
     fn create_user_memory(
@@ -2683,6 +2873,125 @@ impl Store for InMemoryStore {
         Ok(())
     }
 
+    async fn create_service_principal(
+        &self,
+        slug: &str,
+        display_name: &str,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<ServicePrincipal, ServicePrincipalError> {
+        if !valid_service_principal_slug(slug)
+            || !valid_service_principal_label(display_name)
+            || !valid_service_principal_label(actor)
+            || !valid_service_principal_occurred_at(occurred_at)
+        {
+            return Err(ServicePrincipalError::Invalid);
+        }
+        let mut authority = self
+            .service_principals
+            .lock()
+            .map_err(|_| ServicePrincipalError::Backend)?;
+        if authority.principals.contains_key(slug) {
+            return Err(ServicePrincipalError::AlreadyExists);
+        }
+        let principal = ServicePrincipal {
+            slug: slug.to_string(),
+            subject: canonical_service_principal_subject(slug),
+            display_name: display_name.trim().to_string(),
+            disabled: false,
+            created_at: occurred_at,
+            updated_at: occurred_at,
+        };
+        self.append_service_principal_event_memory(
+            &mut authority,
+            slug,
+            ServicePrincipalEventAction::Created,
+            actor.trim(),
+            occurred_at,
+        )?;
+        authority
+            .principals
+            .insert(slug.to_string(), principal.clone());
+        Ok(principal)
+    }
+
+    async fn get_service_principal(
+        &self,
+        slug: &str,
+    ) -> Result<Option<ServicePrincipal>, StoreError> {
+        Ok(self
+            .service_principals
+            .lock()
+            .map_err(|_| StoreError::Backend)?
+            .principals
+            .get(slug)
+            .cloned())
+    }
+
+    async fn set_service_principal_disabled(
+        &self,
+        slug: &str,
+        disabled: bool,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<bool, ServicePrincipalError> {
+        if !valid_service_principal_slug(slug)
+            || !valid_service_principal_label(actor)
+            || !valid_service_principal_occurred_at(occurred_at)
+        {
+            return Err(ServicePrincipalError::Invalid);
+        }
+        let mut authority = self
+            .service_principals
+            .lock()
+            .map_err(|_| ServicePrincipalError::Backend)?;
+        let current_disabled = authority
+            .principals
+            .get(slug)
+            .ok_or(ServicePrincipalError::NotFound)?
+            .disabled;
+        if current_disabled == disabled {
+            return Ok(false);
+        }
+        let action = if disabled {
+            ServicePrincipalEventAction::Disabled
+        } else {
+            ServicePrincipalEventAction::Enabled
+        };
+        self.append_service_principal_event_memory(
+            &mut authority,
+            slug,
+            action,
+            actor.trim(),
+            occurred_at,
+        )?;
+        let principal = authority
+            .principals
+            .get_mut(slug)
+            .ok_or(ServicePrincipalError::Backend)?;
+        principal.disabled = disabled;
+        principal.updated_at = occurred_at;
+        Ok(true)
+    }
+
+    async fn list_service_principal_events(
+        &self,
+        slug: &str,
+    ) -> Result<Vec<ServicePrincipalEvent>, StoreError> {
+        let authority = self
+            .service_principals
+            .lock()
+            .map_err(|_| StoreError::Backend)?;
+        let mut events = authority
+            .events
+            .iter()
+            .filter(|event| event.principal_slug == slug)
+            .cloned()
+            .collect::<Vec<_>>();
+        events.sort_by_key(|event| event.sequence);
+        Ok(events)
+    }
+
     async fn put_state(&self, state: WebauthnState) {
         self.states
             .lock()
@@ -3444,6 +3753,90 @@ impl PgStore {
         sqlx::query(
             "CREATE UNIQUE INDEX IF NOT EXISTS personal_access_tokens_token_hash_uq \
              ON personal_access_tokens (token_hash)",
+        )
+        .execute(&self.pool)
+        .await?;
+        // Non-human identities live outside `users`: no email/password/session/Passkey
+        // columns exist, and creation intentionally produces no credential.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS service_principals (\
+                 slug TEXT PRIMARY KEY, \
+                 subject TEXT NOT NULL UNIQUE, \
+                 display_name TEXT NOT NULL, \
+                 disabled BOOLEAN NOT NULL DEFAULT false, \
+                 created_at BIGINT NOT NULL, \
+                 updated_at BIGINT NOT NULL, \
+                 next_event_sequence BIGINT NOT NULL DEFAULT 1\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS service_principal_events (\
+                 id TEXT PRIMARY KEY, \
+                 principal_slug TEXT NOT NULL REFERENCES service_principals(slug), \
+                 event_sequence BIGINT, \
+                 subject TEXT NOT NULL, \
+                 action TEXT NOT NULL, \
+                 actor TEXT NOT NULL, \
+                 occurred_at BIGINT NOT NULL\
+             )",
+        )
+        .execute(&self.pool)
+        .await?;
+        // Older deployments ordered audit rows by `(occurred_at, random_id)`, which cannot
+        // faithfully represent commit order when clocks tie or move backwards. Add a durable
+        // per-principal sequence without replacing either table. The one-time backfill is the
+        // best order recoverable for historical rows; every subsequent write allocates its
+        // sequence while holding the principal row lock.
+        sqlx::query(
+            "ALTER TABLE service_principals ADD COLUMN IF NOT EXISTS \
+             next_event_sequence BIGINT NOT NULL DEFAULT 1",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "ALTER TABLE service_principal_events ADD COLUMN IF NOT EXISTS \
+             event_sequence BIGINT",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "WITH ranked AS (\
+                 SELECT id, principal_slug, \
+                        ROW_NUMBER() OVER (PARTITION BY principal_slug \
+                                           ORDER BY occurred_at, id) AS row_offset \
+                 FROM service_principal_events WHERE event_sequence IS NULL\
+             ), maxima AS (\
+                 SELECT principal_slug, COALESCE(MAX(event_sequence), 0) AS base \
+                 FROM service_principal_events GROUP BY principal_slug\
+             ) \
+             UPDATE service_principal_events AS events \
+             SET event_sequence = maxima.base + ranked.row_offset \
+             FROM ranked JOIN maxima USING (principal_slug) \
+             WHERE events.id = ranked.id",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "ALTER TABLE service_principal_events ALTER COLUMN event_sequence SET NOT NULL",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS service_principal_events_sequence_uq \
+             ON service_principal_events (principal_slug, event_sequence)",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "UPDATE service_principals AS principal \
+             SET next_event_sequence = GREATEST(\
+                 principal.next_event_sequence, \
+                 COALESCE((SELECT MAX(event_sequence) + 1 \
+                           FROM service_principal_events AS events \
+                           WHERE events.principal_slug = principal.slug), 1)\
+             )",
         )
         .execute(&self.pool)
         .await?;
@@ -6284,6 +6677,282 @@ impl PgStore {
         Ok(())
     }
 
+    fn service_principal_from_row(
+        row: &sqlx::postgres::PgRow,
+    ) -> Result<ServicePrincipal, sqlx::Error> {
+        let slug: String = row.try_get("slug")?;
+        let subject: String = row.try_get("subject")?;
+        if !valid_service_principal_slug(&slug)
+            || subject != canonical_service_principal_subject(&slug)
+        {
+            return Err(sqlx::Error::Protocol(
+                "non-canonical service principal row".to_string(),
+            ));
+        }
+        let created_at = u64::try_from(row.try_get::<i64, _>("created_at")?).map_err(|_| {
+            sqlx::Error::Protocol("negative service principal created_at".to_string())
+        })?;
+        let updated_at = u64::try_from(row.try_get::<i64, _>("updated_at")?).map_err(|_| {
+            sqlx::Error::Protocol("negative service principal updated_at".to_string())
+        })?;
+        Ok(ServicePrincipal {
+            slug,
+            subject,
+            display_name: row.try_get("display_name")?,
+            disabled: row.try_get("disabled")?,
+            created_at,
+            updated_at,
+        })
+    }
+
+    fn service_principal_event_from_row(
+        row: &sqlx::postgres::PgRow,
+    ) -> Result<ServicePrincipalEvent, sqlx::Error> {
+        let principal_slug: String = row.try_get("principal_slug")?;
+        let subject: String = row.try_get("subject")?;
+        if !valid_service_principal_slug(&principal_slug)
+            || subject != canonical_service_principal_subject(&principal_slug)
+        {
+            return Err(sqlx::Error::Protocol(
+                "non-canonical service principal event".to_string(),
+            ));
+        }
+        let action_value: String = row.try_get("action")?;
+        let action = ServicePrincipalEventAction::from_db(&action_value).ok_or_else(|| {
+            sqlx::Error::Protocol("unknown service principal event action".to_string())
+        })?;
+        let occurred_at = u64::try_from(row.try_get::<i64, _>("occurred_at")?).map_err(|_| {
+            sqlx::Error::Protocol("negative service principal event occurred_at".to_string())
+        })?;
+        let sequence = u64::try_from(row.try_get::<i64, _>("event_sequence")?).map_err(|_| {
+            sqlx::Error::Protocol("invalid service principal event sequence".to_string())
+        })?;
+        if sequence == 0 {
+            return Err(sqlx::Error::Protocol(
+                "invalid service principal event sequence".to_string(),
+            ));
+        }
+        Ok(ServicePrincipalEvent {
+            id: row.try_get("id")?,
+            principal_slug,
+            sequence,
+            subject,
+            action,
+            actor: row.try_get("actor")?,
+            occurred_at,
+        })
+    }
+
+    async fn append_service_principal_event_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        principal_slug: &str,
+        action: ServicePrincipalEventAction,
+        actor: &str,
+        occurred_at: i64,
+    ) -> Result<(), sqlx::Error> {
+        let sequence: i64 = sqlx::query_scalar(
+            "UPDATE service_principals \
+             SET next_event_sequence = next_event_sequence + 1 \
+             WHERE slug=$1 AND next_event_sequence < 9223372036854775807 \
+             RETURNING next_event_sequence - 1",
+        )
+        .bind(principal_slug)
+        .fetch_one(&mut **tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO service_principal_events \
+                 (id, principal_slug, event_sequence, subject, action, actor, occurred_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(new_service_principal_event_id())
+        .bind(principal_slug)
+        .bind(sequence)
+        .bind(canonical_service_principal_subject(principal_slug))
+        .bind(action.as_str())
+        .bind(actor)
+        .bind(occurred_at)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
+    async fn create_service_principal_async(
+        &self,
+        slug: &str,
+        display_name: &str,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<ServicePrincipal, ServicePrincipalError> {
+        if !valid_service_principal_slug(slug)
+            || !valid_service_principal_label(display_name)
+            || !valid_service_principal_label(actor)
+            || !valid_service_principal_occurred_at(occurred_at)
+        {
+            return Err(ServicePrincipalError::Invalid);
+        }
+        let occurred_at_i64 =
+            i64::try_from(occurred_at).map_err(|_| ServicePrincipalError::Invalid)?;
+        let principal = ServicePrincipal {
+            slug: slug.to_string(),
+            subject: canonical_service_principal_subject(slug),
+            display_name: display_name.trim().to_string(),
+            disabled: false,
+            created_at: occurred_at,
+            updated_at: occurred_at,
+        };
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| ServicePrincipalError::Backend)?;
+        if let Err(error) = sqlx::query(
+            "INSERT INTO service_principals \
+                 (slug, subject, display_name, disabled, created_at, updated_at) \
+             VALUES ($1, $2, $3, false, $4, $4)",
+        )
+        .bind(slug)
+        .bind(&principal.subject)
+        .bind(&principal.display_name)
+        .bind(occurred_at_i64)
+        .execute(&mut *tx)
+        .await
+        {
+            let duplicate = matches!(
+                &error,
+                sqlx::Error::Database(database) if database.is_unique_violation()
+            );
+            let _ = tx.rollback().await;
+            return Err(if duplicate {
+                ServicePrincipalError::AlreadyExists
+            } else {
+                ServicePrincipalError::Backend
+            });
+        }
+        if Self::append_service_principal_event_tx(
+            &mut tx,
+            slug,
+            ServicePrincipalEventAction::Created,
+            actor.trim(),
+            occurred_at_i64,
+        )
+        .await
+        .is_err()
+        {
+            let _ = tx.rollback().await;
+            return Err(ServicePrincipalError::Backend);
+        }
+        tx.commit()
+            .await
+            .map_err(|_| ServicePrincipalError::Backend)?;
+        Ok(principal)
+    }
+
+    async fn get_service_principal_async(
+        &self,
+        slug: &str,
+    ) -> Result<Option<ServicePrincipal>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT slug, subject, display_name, disabled, created_at, updated_at \
+             FROM service_principals WHERE slug = $1",
+        )
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref()
+            .map(Self::service_principal_from_row)
+            .transpose()
+    }
+
+    async fn set_service_principal_disabled_async(
+        &self,
+        slug: &str,
+        disabled: bool,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<bool, ServicePrincipalError> {
+        if !valid_service_principal_slug(slug)
+            || !valid_service_principal_label(actor)
+            || !valid_service_principal_occurred_at(occurred_at)
+        {
+            return Err(ServicePrincipalError::Invalid);
+        }
+        let occurred_at_i64 =
+            i64::try_from(occurred_at).map_err(|_| ServicePrincipalError::Invalid)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| ServicePrincipalError::Backend)?;
+        let principal =
+            sqlx::query("SELECT disabled FROM service_principals WHERE slug=$1 FOR UPDATE")
+                .bind(slug)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|_| ServicePrincipalError::Backend)?;
+        let Some(principal) = principal else {
+            let _ = tx.rollback().await;
+            return Err(ServicePrincipalError::NotFound);
+        };
+        if principal.get::<bool, _>("disabled") == disabled {
+            tx.commit()
+                .await
+                .map_err(|_| ServicePrincipalError::Backend)?;
+            return Ok(false);
+        }
+        if sqlx::query("UPDATE service_principals SET disabled=$2, updated_at=$3 WHERE slug=$1")
+            .bind(slug)
+            .bind(disabled)
+            .bind(occurred_at_i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| ServicePrincipalError::Backend)?
+            .rows_affected()
+            != 1
+        {
+            let _ = tx.rollback().await;
+            return Err(ServicePrincipalError::Backend);
+        }
+        let action = if disabled {
+            ServicePrincipalEventAction::Disabled
+        } else {
+            ServicePrincipalEventAction::Enabled
+        };
+        if Self::append_service_principal_event_tx(
+            &mut tx,
+            slug,
+            action,
+            actor.trim(),
+            occurred_at_i64,
+        )
+        .await
+        .is_err()
+        {
+            let _ = tx.rollback().await;
+            return Err(ServicePrincipalError::Backend);
+        }
+        tx.commit()
+            .await
+            .map_err(|_| ServicePrincipalError::Backend)?;
+        Ok(true)
+    }
+
+    async fn list_service_principal_events_async(
+        &self,
+        slug: &str,
+    ) -> Result<Vec<ServicePrincipalEvent>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, principal_slug, event_sequence, subject, action, actor, occurred_at \
+             FROM service_principal_events WHERE principal_slug=$1 \
+             ORDER BY event_sequence",
+        )
+        .bind(slug)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(Self::service_principal_event_from_row)
+            .collect()
+    }
+
     async fn put_state_async(&self, s: &WebauthnState) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO webauthn_states (id, kind, state, expires_at) VALUES ($1, $2, $3, $4) \
@@ -6943,6 +7612,60 @@ impl Store for PgStore {
             .await
             .map_err(|_| {
                 tracing::error!("pg revoke_personal_token failed");
+                StoreError::Backend
+            })
+    }
+
+    async fn create_service_principal(
+        &self,
+        slug: &str,
+        display_name: &str,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<ServicePrincipal, ServicePrincipalError> {
+        self.create_service_principal_async(slug, display_name, actor, occurred_at)
+            .await
+            .inspect_err(|error| {
+                if *error == ServicePrincipalError::Backend {
+                    tracing::error!("pg create_service_principal failed");
+                }
+            })
+    }
+
+    async fn get_service_principal(
+        &self,
+        slug: &str,
+    ) -> Result<Option<ServicePrincipal>, StoreError> {
+        self.get_service_principal_async(slug).await.map_err(|_| {
+            tracing::error!("pg get_service_principal failed");
+            StoreError::Backend
+        })
+    }
+
+    async fn set_service_principal_disabled(
+        &self,
+        slug: &str,
+        disabled: bool,
+        actor: &str,
+        occurred_at: u64,
+    ) -> Result<bool, ServicePrincipalError> {
+        self.set_service_principal_disabled_async(slug, disabled, actor, occurred_at)
+            .await
+            .inspect_err(|error| {
+                if *error == ServicePrincipalError::Backend {
+                    tracing::error!("pg set_service_principal_disabled failed");
+                }
+            })
+    }
+
+    async fn list_service_principal_events(
+        &self,
+        slug: &str,
+    ) -> Result<Vec<ServicePrincipalEvent>, StoreError> {
+        self.list_service_principal_events_async(slug)
+            .await
+            .map_err(|_| {
+                tracing::error!("pg list_service_principal_events failed");
                 StoreError::Backend
             })
     }

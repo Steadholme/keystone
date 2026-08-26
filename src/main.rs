@@ -9,11 +9,30 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
+mod operator;
+
 #[tokio::main]
 async fn main() {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
     // Container HEALTHCHECK path — handled before any server setup, exits the process.
-    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+    if args.first().map(String::as_str) == Some("healthcheck") {
         std::process::exit(run_healthcheck());
+    }
+    // Offline authority operations never initialise the HTTP application or tracing.
+    if args.first().map(String::as_str) == Some("service-principal") {
+        match operator::run_from_env(&args[1..]).await {
+            Ok(success) => {
+                println!("{}", success.message());
+                return;
+            }
+            Err(error) => {
+                eprintln!("service-principal: {error}");
+                if error == operator::OperatorError::InvalidArguments {
+                    eprintln!("{}", operator::USAGE);
+                }
+                std::process::exit(1);
+            }
+        }
     }
 
     tracing_subscriber::fmt::init();
