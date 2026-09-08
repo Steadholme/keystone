@@ -1,0 +1,26 @@
+{
+  "schema_version": "run/3.0",
+  "run_id": "run-21f4672aa4c6",
+  "session_id": "20260826-ralph-system-principal",
+  "step_id": "system-session-complete",
+  "parent_run_id": null,
+  "retry_of_run_id": null,
+  "attempt": 1,
+  "command": "session-complete",
+  "args": [],
+  "goal": null,
+  "status": "sealed",
+  "revision": 2,
+  "actor_id": "workspace-owner",
+  "input_refs": [],
+  "output_refs": [
+    "ART-f8859690a848db9514af"
+  ],
+  "primary_artifact_id": "ART-f8859690a848db9514af",
+  "verdict": "done",
+  "summary": "system 服务身份已完成、双推、生产上线并通过验收",
+  "created_at": "2026-08-26T13:27:59.030Z",
+  "started_at": "2026-08-26T13:27:59.031Z",
+  "ended_at": "2026-08-26T13:29:12.620Z",
+  "sealed_at": "2026-08-26T13:29:12.620Z"
+}

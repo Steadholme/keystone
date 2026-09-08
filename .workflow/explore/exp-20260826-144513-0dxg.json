@@ -1,0 +1,48 @@
+{
+  "id": "exp-20260826-144513-0dxg",
+  "startedAt": "2026-08-26T12:45:13.332Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: New service credential introspection module exports, route mounting, and dedicated tests that were added for system principals\\nSCOPE: src/lib.rs, src/handlers/mod.rs, src/handlers/service_introspect.rs, tests/service_principal_introspection.rs\\nATTENTION: Rust Axum; preserve existing PAT, assurance, and lifecycle internal routes\\nEXPECTED: file:line list with exact removal points and any reusable test helpers"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 1,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 626,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: New service credential introspection module exports, route mounting, and dedicated tests that were added for system principals\\nSCOPE: src/lib.rs, src/handlers/mod.rs, src/handlers/service_introspect.rs, tests/service_principal_introspection.rs\\nATTENTION: Rust Axum; preserve existing PAT, assurance, and lifecycle internal routes\\nEXPECTED: file:line list with exact removal points and any reusable test helpers",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 610,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

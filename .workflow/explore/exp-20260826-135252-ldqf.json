@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-135252-ldqf",
+  "startedAt": "2026-08-26T11:52:52.702Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Store trait, MemoryStore, PgStore, schema migration, and PAT lifecycle symbols that a service principal model must mirror\\nSCOPE: src/store.rs, tests/\\nATTENTION: Rust, additive PostgreSQL DDL, durable events in same transaction\\nEXPECTED: symbol + file:line + relevant test file",
+    "FIND: Binary entrypoint and operator command patterns suitable for create, credential-add, revoke, and disable\\nSCOPE: src/main.rs, src/bin/, Cargo.toml, tests/\\nATTENTION: Rust CLI, no HTTP management surface\\nEXPECTED: symbol + file:line + exact command/test pattern",
+    "FIND: Internal introspection route, INTERNAL_TLS gate, Basic auth consumer validation, error mapping, and deployment single-active references\\nSCOPE: src/lib.rs, src/main.rs, src/handlers/, tests/, README.md, /root/w33d_infra/deploy/README.md\\nATTENTION: Rust Axum, fail closed, backend error 503\\nEXPECTED: symbol + file:line + verification commands"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 832,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Store trait, MemoryStore, PgStore, schema migration, and PAT lifecycle symbols that a service principal model must mirror\\nSCOPE: src/store.rs, tests/\\nATTENTION: Rust, additive PostgreSQL DDL, durable events in same transaction\\nEXPECTED: symbol + file:line + relevant test file",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 804,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Binary entrypoint and operator command patterns suitable for create, credential-add, revoke, and disable\\nSCOPE: src/main.rs, src/bin/, Cargo.toml, tests/\\nATTENTION: Rust CLI, no HTTP management surface\\nEXPECTED: symbol + file:line + exact command/test pattern",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 755,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: Internal introspection route, INTERNAL_TLS gate, Basic auth consumer validation, error mapping, and deployment single-active references\\nSCOPE: src/lib.rs, src/main.rs, src/handlers/, tests/, README.md, /root/w33d_infra/deploy/README.md\\nATTENTION: Rust Axum, fail closed, backend error 503\\nEXPECTED: symbol + file:line + verification commands",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 724,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

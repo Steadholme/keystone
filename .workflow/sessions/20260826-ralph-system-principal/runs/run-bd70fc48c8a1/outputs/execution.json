@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "kind": "artifact",
+    "schema": "artifacts/1.0",
+    "role": "primary",
+    "alias": "current-execution"
+  },
+  "status": "completed",
+  "summary": "Implemented and deployed an identity-only system principal in Keystone. The first production principal is structurally separate from users, has no login surface, no credential schema or issuance surface, and no authorization grant.",
+  "source_commit": "3f9a305a9e5a183568573dea2b24f6eb0d6b968a",
+  "deployment_image": "steadholme/keystone:3f9a305a9e5a-system-principal",
+  "scope_deviation": {
+    "decision": "defer credential issuance and introspection until Rikune integration",
+    "reason": "Independent security review found that immediate activation before durable secret delivery would leave crash and path-race ambiguity. The production release was narrowed to the user-requested inert bootstrap identity.",
+    "follow_up_gate": "pending -> secure deliver -> active, bounded TTL, rotation, and auditable introspection"
+  },
+  "production_state": {
+    "principal_created": true,
+    "human_user_rows": 0,
+    "credential_surface_present": false,
+    "verdict_grants": 0,
+    "single_active_instances": 1
+  }
+}

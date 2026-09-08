@@ -1,0 +1,183 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_46f6cfc7-741a-473f-9bfe-dd100bd51365",
+  "request_id": "req-20260826-system-principal-complete-plan-v1",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 13,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 12,
+  "revision_after": 13,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "计划经独立 reviewer 修订并由 plan-check PASS，用户已明确授权执行该边界内变更",
+  "evidence_refs": [
+    ".workflow/sessions/20260826-ralph-system-principal/runs/run-4638ab900fc1/outputs/plan-check.json",
+    ".workflow/sessions/20260826-ralph-system-principal/runs/run-4638ab900fc1/outputs/plan.json"
+  ],
+  "recorded_at": "2026-08-26T12:15:13.077Z",
+  "result": {
+    "operation": "run-complete-and-seal",
+    "run_id": "run-4638ab900fc1",
+    "run_revision": 2,
+    "status": "sealed",
+    "orchestration_revision": 13,
+    "artifact_publication": {
+      "authority": "transition-receipt/2.0",
+      "artifact_registry_revision": 2,
+      "artifact_ids": [
+        "ART-96800a74daf37c038f90",
+        "ART-eab82e42b259e4d02307",
+        "ART-24b7cf962e81009364f7",
+        "ART-d996a129162a5822bc3a",
+        "ART-2d818528c4b481d2531c",
+        "ART-2c6f4ed3a5b28cc8db8c",
+        "ART-f2915e2c70262e4e0b98",
+        "ART-a4c13cc9f51cad52adfa",
+        "ART-ec9fad82575d437ccbba"
+      ],
+      "primary_artifact_id": "ART-d996a129162a5822bc3a",
+      "artifacts": {
+        "ART-96800a74daf37c038f90": {
+          "kind": "collision-report",
+          "role": "evidence",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/collision-report.json",
+          "media_type": "application/json",
+          "schema_version": "collision-report/1.0",
+          "content_hash": "19461eb4fcd3f888676132a7507538d35599e533793588e6625b104a81df0100",
+          "size": 252,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-eab82e42b259e4d02307": {
+          "kind": "dependency-graph",
+          "role": "evidence",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/dependency-graph.json",
+          "media_type": "application/json",
+          "schema_version": "dependency-graph/1.0",
+          "content_hash": "6800b83d9d3302c0a803cd8eacc815be879ad78373410a5a7092b7d668f306c2",
+          "size": 412,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-24b7cf962e81009364f7": {
+          "kind": "plan-check",
+          "role": "evidence",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/plan-check.json",
+          "media_type": "application/json",
+          "schema_version": "plan-check/1.0",
+          "content_hash": "c1fc5fb27f23e57f8353ea2a42f8943710b391e8d63086dd3cbe29a0a29f6be5",
+          "size": 619,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-d996a129162a5822bc3a": {
+          "kind": "plan",
+          "role": "primary",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/plan.json",
+          "media_type": "application/json",
+          "schema_version": "plan/1.0",
+          "content_hash": "25e7321ee4f57704180a27a0a65b7eeed8154415c413af0e6ed9f5d958ade10b",
+          "size": 3616,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-2d818528c4b481d2531c": {
+          "kind": "plan-task",
+          "role": "attachment",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-001.json",
+          "media_type": "application/json",
+          "schema_version": "plan-task/1.0",
+          "content_hash": "6e375a0f9aa8537ff3f6a1c41607aa07f0cbd81893c33e661903041f527ac21e",
+          "size": 1600,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-2c6f4ed3a5b28cc8db8c": {
+          "kind": "plan-task",
+          "role": "attachment",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-002.json",
+          "media_type": "application/json",
+          "schema_version": "plan-task/1.0",
+          "content_hash": "d0c697db14550475866e9ed23a4f55681156068dc6c26972df4bb6f485e37074",
+          "size": 1318,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-f2915e2c70262e4e0b98": {
+          "kind": "plan-task",
+          "role": "attachment",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-003.json",
+          "media_type": "application/json",
+          "schema_version": "plan-task/1.0",
+          "content_hash": "ab38c240fb7f6428a360976ed74c8583f048490bea7bbd78a03f7acc42cade48",
+          "size": 1655,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-a4c13cc9f51cad52adfa": {
+          "kind": "plan-task",
+          "role": "attachment",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-004.json",
+          "media_type": "application/json",
+          "schema_version": "plan-task/1.0",
+          "content_hash": "98040f3de78d95d5fdc1e32aed2e61031e299373614b029b4a9faec07b275a82",
+          "size": 1961,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-ec9fad82575d437ccbba": {
+          "kind": "execution-waves",
+          "role": "attachment",
+          "producer_run_id": "run-4638ab900fc1",
+          "relative_path": "runs/run-4638ab900fc1/outputs/waves.json",
+          "media_type": "application/json",
+          "schema_version": "execution-waves/1.0",
+          "content_hash": "2e619aeb133a256f43e8ce4d98c40cda22f24d20a2a1d4a742f902a720a3df98",
+          "size": 368,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        }
+      },
+      "aliases": {
+        "current-plan": "ART-d996a129162a5822bc3a"
+      }
+    },
+    "output_warnings": [],
+    "next_step_id": "system-execute",
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Run sealed; explicit run next may allocate the next chain Run"
+    },
+    "knowledge_reconciliation": {
+      "schema_version": "knowledge-reconciliation-receipt/1.0",
+      "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retrieval_mode": "lexical-kg",
+      "candidates": 0,
+      "duplicates": 0,
+      "conflicts": 0,
+      "review_required": 0,
+      "suppressed": 0,
+      "review_command": "maestro knowledge review 20260826-ralph-system-principal"
+    }
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_3f11c5bd-7f3c-4d60-b214-91b544c44110",
+  "request_id": "req-system-test-complete-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 23,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 22,
+  "revision_after": 23,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "five production acceptance scenarios observed and passed",
+  "evidence_refs": [
+    "ART-2dcc6373f8d77ae09540",
+    "deploy:production-principal-isolation-pass",
+    "deploy:verdict-zero-grants-pass"
+  ],
+  "recorded_at": "2026-08-26T13:24:13.679Z",
+  "result": {
+    "operation": "run-complete-and-seal",
+    "run_id": "run-81ba3bd29bf5",
+    "run_revision": 2,
+    "status": "sealed",
+    "orchestration_revision": 23,
+    "artifact_publication": {
+      "authority": "transition-receipt/2.0",
+      "artifact_registry_revision": 6,
+      "artifact_ids": [
+        "ART-af8aea3e6fac6ab27df2",
+        "ART-6152b0c04e94960eb4d1",
+        "ART-3f70a2f0a3a160f2f363",
+        "ART-32ce77d2a0c96b14f3fe",
+        "ART-1373d67a5a66f8f4f8bd"
+      ],
+      "primary_artifact_id": "ART-32ce77d2a0c96b14f3fe",
+      "artifacts": {
+        "ART-af8aea3e6fac6ab27df2": {
+          "kind": "acceptance",
+          "role": "evidence",
+          "producer_run_id": "run-81ba3bd29bf5",
+          "relative_path": "runs/run-81ba3bd29bf5/outputs/acceptance.json",
+          "media_type": "application/json",
+          "schema_version": "acceptance/1.0",
+          "content_hash": "e425aa93818a22f1459b4ac6d3a7288c902bdef7c707c69bd0e76d6954dae311",
+          "size": 383,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-6152b0c04e94960eb4d1": {
+          "kind": "coverage",
+          "role": "evidence",
+          "producer_run_id": "run-81ba3bd29bf5",
+          "relative_path": "runs/run-81ba3bd29bf5/outputs/coverage.json",
+          "media_type": "application/json",
+          "schema_version": "coverage/1.0",
+          "content_hash": "172982dafa36e5bf34b2d95369eaf32b7d88a3b04b9baf98bb53dd06780de4d9",
+          "size": 176,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-3f70a2f0a3a160f2f363": {
+          "kind": "test-plan",
+          "role": "attachment",
+          "producer_run_id": "run-81ba3bd29bf5",
+          "relative_path": "runs/run-81ba3bd29bf5/outputs/test-plan.json",
+          "media_type": "application/json",
+          "schema_version": "test-plan/1.0",
+          "content_hash": "bbe72aeda24f4b33d4a7ac7dbda48138e074dccc925c600b2934392c8e9a12a5",
+          "size": 744,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-32ce77d2a0c96b14f3fe": {
+          "kind": "test-results",
+          "role": "primary",
+          "producer_run_id": "run-81ba3bd29bf5",
+          "relative_path": "runs/run-81ba3bd29bf5/outputs/test-results.json",
+          "media_type": "application/json",
+          "schema_version": "test-results/1.0",
+          "content_hash": "3e88edbcc8cae8911d5098f7282b9ba035035810dfbe77eaa1ea9d5cfcd78c8b",
+          "size": 839,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-1373d67a5a66f8f4f8bd": {
+          "kind": "uat-log",
+          "role": "attachment",
+          "producer_run_id": "run-81ba3bd29bf5",
+          "relative_path": "runs/run-81ba3bd29bf5/outputs/uat.md",
+          "media_type": "text/markdown",
+          "schema_version": "uat-log/1.0",
+          "content_hash": "8aa0e64b58390bcd349603aaac998cd23fb031c87c02b193ee0e9e2af984311b",
+          "size": 513,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        }
+      },
+      "aliases": {
+        "latest-test": "ART-32ce77d2a0c96b14f3fe"
+      }
+    },
+    "output_warnings": [
+      "Expected outputs/issue-candidates.json was not produced",
+      "Expected outputs/e2e-results.json was not produced"
+    ],
+    "next_step_id": "system-goal-audit",
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Run sealed; explicit run next may allocate the next chain Run"
+    },
+    "knowledge_reconciliation": {
+      "schema_version": "knowledge-reconciliation-receipt/1.0",
+      "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retrieval_mode": "lexical-kg",
+      "candidates": 0,
+      "duplicates": 0,
+      "conflicts": 0,
+      "review_required": 0,
+      "suppressed": 0,
+      "review_command": "maestro knowledge review 20260826-ralph-system-principal"
+    }
+  }
+}

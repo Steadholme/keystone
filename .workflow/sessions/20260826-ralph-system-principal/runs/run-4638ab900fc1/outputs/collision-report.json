@@ -1,0 +1,6 @@
+{
+  "_meta": {"kind": "collision-report", "schema": "collision-report/1.0", "role": "evidence"},
+  "verdict": "clear",
+  "collisions": [],
+  "notes": ["WAVE-002 中 TASK-002 与 TASK-003 的 files 集合无交集；read_first 不计入写冲突。"]
+}

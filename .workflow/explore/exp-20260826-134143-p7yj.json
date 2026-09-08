@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-134143-p7yj",
+  "startedAt": "2026-08-26T11:41:43.165Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Non-human credential and Bearer token definitions plus creation validation rotation revocation and expiry flows.\\nSCOPE: /root/w33d_infra/keystone/src/, /root/w33d_infra/keystone/migrations/, /root/w33d_infra/keystone/tests/\\nEXCLUDE: .env files, secret files, generated files, vendor directories\\nATTENTION: Go service, do not reveal token values or configuration secrets\\nEXPECTED: file:line anchors grouped by credential family and lifecycle stage",
+    "FIND: OAuth confidential client and token introspection HTTP routes including caller authentication and scope enforcement.\\nSCOPE: /root/w33d_infra/keystone/src/, /root/w33d_infra/keystone/cmd/, /root/w33d_infra/keystone/tests/\\nEXCLUDE: .env files, secret files, generated files, vendor directories\\nATTENTION: distinguish public browser routes from internal service routes\\nEXPECTED: route-to-handler-to-store call chain with file:line anchors",
+    "FIND: Audit events emitted for non-human credential creation use rotation revocation denial and introspection.\\nSCOPE: /root/w33d_infra/keystone/src/, /root/w33d_infra/keystone/migrations/, /root/w33d_infra/keystone/tests/\\nEXCLUDE: .env files, secret files, generated files, vendor directories\\nATTENTION: identify missing audit coverage explicitly\\nEXPECTED: event names and emit sites with file:line anchors"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 4,
+  "durationMs": 1004,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Non-human credential and Bearer token definitions plus creation validation rotation revocation and expiry flows.\\nSCOPE: /root/w33d_infra/keystone/src/, /root/w33d_infra/keystone/migrations/, /root/w33d_infra/keystone/tests/\\nEXCLUDE: .env files, secret files, generated files, vendor directories\\nATTENTION: Go service, do not reveal token values or configuration secrets\\nEXPECTED: file:line anchors grouped by credential family and lifecycle stage",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 986,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: OAuth confidential client and token introspection HTTP routes including caller authentication and scope enforcement.\\nSCOPE: /root/w33d_infra/keystone/src/, /root/w33d_infra/keystone/cmd/, /root/w33d_infra/keystone/tests/\\nEXCLUDE: .env files, secret files, generated files, vendor directories\\nATTENTION: distinguish public browser routes from internal service routes\\nEXPECTED: route-to-handler-to-store call chain with file:line anchors",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 608,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: Audit events emitted for non-human credential creation use rotation revocation denial and introspection.\\nSCOPE: /root/w33d_infra/keystone/src/, /root/w33d_infra/keystone/migrations/, /root/w33d_infra/keystone/tests/\\nEXCLUDE: .env files, secret files, generated files, vendor directories\\nATTENTION: identify missing audit coverage explicitly\\nEXPECTED: event names and emit sites with file:line anchors",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 927,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

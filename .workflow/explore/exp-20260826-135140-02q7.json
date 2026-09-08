@@ -1,0 +1,80 @@
+{
+  "id": "exp-20260826-135140-02q7",
+  "startedAt": "2026-08-26T11:51:40.279Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Existing plan/1.0 artifacts containing _meta, waves, and task_ids fields\\nSCOPE: .workflow/sessions/\\nEXPECTED: file paths and complete top-level schema summary",
+    "FIND: Existing workflow task artifacts containing convergence, read_first, files, and meta fields\\nSCOPE: .workflow/sessions/\\nEXPECTED: file paths and complete field schema summary"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 2,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 1245,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Existing plan/1.0 artifacts containing _meta, waves, and task_ids fields\\nSCOPE: .workflow/sessions/\\nEXPECTED: file paths and complete top-level schema summary",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 615,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Existing workflow task artifacts containing convergence, read_first, files, and meta fields\\nSCOPE: .workflow/sessions/\\nEXPECTED: file paths and complete field schema summary",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 1230,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

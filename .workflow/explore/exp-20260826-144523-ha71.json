@@ -1,0 +1,80 @@
+{
+  "id": "exp-20260826-144523-ha71",
+  "startedAt": "2026-08-26T12:45:23.277Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: service principal event persistence and ordering in Store implementations\\nSCOPE: src/store.rs\\nATTENTION: Rust, Memory and PostgreSQL parity\\nEXPECTED: file:line list with schema and write/read methods",
+    "FIND: service principal PostgreSQL and concurrency tests\\nSCOPE: tests/service_principal_store.rs\\nATTENTION: Rust tokio tests, ignored database tests\\nEXPECTED: test name + file:line + current skip behavior"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 2,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 776,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: service principal event persistence and ordering in Store implementations\\nSCOPE: src/store.rs\\nATTENTION: Rust, Memory and PostgreSQL parity\\nEXPECTED: file:line list with schema and write/read methods",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 758,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: service principal PostgreSQL and concurrency tests\\nSCOPE: tests/service_principal_store.rs\\nATTENTION: Rust tokio tests, ignored database tests\\nEXPECTED: test name + file:line + current skip behavior",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 677,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "kind": "auto-test-report",
+    "schema": "auto-test-report/1.0",
+    "role": "primary",
+    "alias": "latest-auto-test"
+  },
+  "status": "converged",
+  "route": "code-and-review",
+  "iterations": 1,
+  "layers_run_in_order": ["L0", "L1", "L2", "L3"],
+  "pass_rate": 1.0,
+  "confidence": 0.99,
+  "generated_tests": [
+    "tests/service_principal_store.rs",
+    "tests/service_principal_isolation.rs"
+  ],
+  "failures": [],
+  "notes": "The tests were generated during the execute stage and re-used as the durable auto-test scenario set; final execution included an explicit isolated PostgreSQL 18 run."
+}

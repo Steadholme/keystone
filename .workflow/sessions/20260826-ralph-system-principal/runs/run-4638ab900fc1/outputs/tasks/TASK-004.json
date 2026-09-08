@@ -1,0 +1,23 @@
+{
+  "_meta": {"kind": "plan-task", "schema": "plan-task/1.0", "role": "attachment"},
+  "id": "TASK-004",
+  "title": "构建、双远端推送、single-active 部署并创建零授权 principal",
+  "requirement_refs": ["D3", "D4", "D5"],
+  "depends_on": ["TASK-001", "TASK-002", "TASK-003"],
+  "files": ["/root/w33d_infra/deploy/docker-compose.yml"],
+  "read_first": ["Dockerfile", "README.md", "/root/w33d_infra/deploy/README.md", "/root/w33d_infra/deploy/docker-compose.yml", "/root/w33d_infra/Makefile"],
+  "implementation": [
+    "运行 cargo fmt --check、cargo clippy --all-targets -- -D warnings、cargo test --all-targets；以中文 commit feat: 添加内部 system 服务身份提交 main，并执行 git push both main 后核对 loom/github main SHA 相同。",
+    "用 12 位 commit SHA 更新 Keystone image tag 并构建候选；备份数据库后严格执行 docker compose stop --timeout 30 keystone、make -C .. iga-keystone-quiesced、docker compose up -d --no-deps --force-recreate keystone。",
+    "健康检查通过后执行 service-principal create 创建首个 active 实例；不执行 credential-add，不写 Verdict tuple；查询确认 credential count=0、Verdict subject tuple count=0、users count=0。"
+  ],
+  "acceptance": ["部署全程 running Keystone container count 不超过 1；首个 principal active 且无 credential、grant、human user 行。"],
+  "convergence": {"criteria": [
+    "cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --all-targets 退出码为 0。",
+    "git ls-remote loom refs/heads/main 与 git ls-remote github refs/heads/main 返回同一 HEAD。",
+    "make -C /root/w33d_infra iga-keystone-quiesced 退出码为 0 后才启动候选。",
+    "docker compose exec -T keystone keystone healthcheck 退出码为 0。",
+    "生产只读查询返回 principal active=true、credential_count=0、verdict_tuple_count=0、users_count=0。"
+  ]},
+  "status": "pending"
+}

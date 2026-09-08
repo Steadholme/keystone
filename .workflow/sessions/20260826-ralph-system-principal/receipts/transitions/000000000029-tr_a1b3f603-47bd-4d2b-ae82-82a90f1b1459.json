@@ -1,0 +1,71 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_a1b3f603-47bd-4d2b-ae82-82a90f1b1459",
+  "request_id": "req-session-complete-run-20260826-01",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 29,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 28,
+  "revision_after": 29,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "实现、验证、双推与生产创建均完成，封存最终 Session 摘要",
+  "evidence_refs": [
+    ".workflow/sessions/20260826-ralph-system-principal/runs/run-21f4672aa4c6/outputs/session-summary.json",
+    "ART-0803469cec90839c9d06"
+  ],
+  "recorded_at": "2026-08-26T13:29:12.620Z",
+  "result": {
+    "operation": "run-complete-and-seal",
+    "run_id": "run-21f4672aa4c6",
+    "run_revision": 2,
+    "status": "sealed",
+    "orchestration_revision": 29,
+    "artifact_publication": {
+      "authority": "transition-receipt/2.0",
+      "artifact_registry_revision": 8,
+      "artifact_ids": [
+        "ART-f8859690a848db9514af"
+      ],
+      "primary_artifact_id": "ART-f8859690a848db9514af",
+      "artifacts": {
+        "ART-f8859690a848db9514af": {
+          "kind": "session-summary",
+          "role": "primary",
+          "producer_run_id": "run-21f4672aa4c6",
+          "relative_path": "runs/run-21f4672aa4c6/outputs/session-summary.json",
+          "media_type": "application/json",
+          "schema_version": "session-summary/1.0",
+          "content_hash": "6620bb8817a2286a2e9a684b63759a5d66cdb70752c4423ab10423d72f124682",
+          "size": 1230,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        }
+      },
+      "aliases": {
+        "session-summary": "ART-f8859690a848db9514af"
+      }
+    },
+    "output_warnings": [],
+    "next_step_id": null,
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Run sealed; no pending chain step remains"
+    },
+    "knowledge_reconciliation": {
+      "schema_version": "knowledge-reconciliation-receipt/1.0",
+      "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retrieval_mode": "lexical-kg",
+      "candidates": 0,
+      "duplicates": 0,
+      "conflicts": 0,
+      "review_required": 0,
+      "suppressed": 0,
+      "review_command": "maestro knowledge review 20260826-ralph-system-principal"
+    }
+  }
+}

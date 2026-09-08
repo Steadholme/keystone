@@ -1,0 +1,70 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_71ae9e58-04f3-424a-964c-b27e6776954c",
+  "request_id": "req-goal-audit-complete-20260826-01",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 26,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 25,
+  "revision_after": 26,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "系统身份目标已完成；credential 与 per-app 身份按用户边界延后至 Rikune 集成阶段",
+  "evidence_refs": [
+    ".workflow/sessions/20260826-ralph-system-principal/runs/run-fc5b9c78227e/outputs/goal-audit.json"
+  ],
+  "recorded_at": "2026-08-26T13:27:13.102Z",
+  "result": {
+    "operation": "run-complete-and-seal",
+    "run_id": "run-fc5b9c78227e",
+    "run_revision": 2,
+    "status": "sealed",
+    "orchestration_revision": 26,
+    "artifact_publication": {
+      "authority": "transition-receipt/2.0",
+      "artifact_registry_revision": 7,
+      "artifact_ids": [
+        "ART-0803469cec90839c9d06"
+      ],
+      "primary_artifact_id": "ART-0803469cec90839c9d06",
+      "artifacts": {
+        "ART-0803469cec90839c9d06": {
+          "kind": "goal-audit",
+          "role": "primary",
+          "producer_run_id": "run-fc5b9c78227e",
+          "relative_path": "runs/run-fc5b9c78227e/outputs/goal-audit.json",
+          "media_type": "application/json",
+          "schema_version": "goal-audit/1.0",
+          "content_hash": "1c593add931f79cc6db9e4c31a17c6226e345a883e99e28bdc3b1569663e51d5",
+          "size": 1613,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        }
+      },
+      "aliases": {
+        "latest-goal-audit": "ART-0803469cec90839c9d06"
+      }
+    },
+    "output_warnings": [],
+    "next_step_id": "system-session-complete",
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Run sealed; explicit run next may allocate the next chain Run"
+    },
+    "knowledge_reconciliation": {
+      "schema_version": "knowledge-reconciliation-receipt/1.0",
+      "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retrieval_mode": "lexical-kg",
+      "candidates": 0,
+      "duplicates": 0,
+      "conflicts": 0,
+      "review_required": 0,
+      "suppressed": 0,
+      "review_command": "maestro knowledge review 20260826-ralph-system-principal"
+    }
+  }
+}

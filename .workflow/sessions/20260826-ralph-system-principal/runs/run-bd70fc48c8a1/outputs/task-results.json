@@ -1,0 +1,29 @@
+{
+  "_meta": {
+    "kind": "task-results",
+    "schema": "task-results/1.0",
+    "role": "attachment"
+  },
+  "tasks": [
+    {
+      "task_id": "TASK-001",
+      "status": "done",
+      "summary": "Added independent principal and ordered durable lifecycle events in Memory and PostgreSQL with atomic rollback."
+    },
+    {
+      "task_id": "TASK-002",
+      "status": "done",
+      "summary": "Added offline create/disable operator commands with explicit actor and no implicit migration. Credential commands were removed by security review."
+    },
+    {
+      "task_id": "TASK-003",
+      "status": "superseded",
+      "summary": "Introspection was deliberately not shipped. No credential schema, token API, issuance route, or introspection route exists in this release."
+    },
+    {
+      "task_id": "TASK-004",
+      "status": "done",
+      "summary": "Passed full and isolated PostgreSQL gates, pushed both remotes, deployed single-active, and created the zero-login/zero-grant production principal."
+    }
+  ]
+}

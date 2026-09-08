@@ -1,0 +1,37 @@
+{
+  "schema_version": "run/3.0",
+  "run_id": "run-4638ab900fc1",
+  "session_id": "20260826-ralph-system-principal",
+  "step_id": "system-plan",
+  "parent_run_id": null,
+  "retry_of_run_id": null,
+  "attempt": 1,
+  "command": "plan",
+  "args": [
+    "--session",
+    "{session}"
+  ],
+  "goal": null,
+  "status": "sealed",
+  "revision": 2,
+  "actor_id": "workspace-owner",
+  "input_refs": [],
+  "output_refs": [
+    "ART-96800a74daf37c038f90",
+    "ART-eab82e42b259e4d02307",
+    "ART-24b7cf962e81009364f7",
+    "ART-d996a129162a5822bc3a",
+    "ART-2d818528c4b481d2531c",
+    "ART-2c6f4ed3a5b28cc8db8c",
+    "ART-f2915e2c70262e4e0b98",
+    "ART-a4c13cc9f51cad52adfa",
+    "ART-ec9fad82575d437ccbba"
+  ],
+  "primary_artifact_id": "ART-d996a129162a5822bc3a",
+  "verdict": "done",
+  "summary": "4 任务计划通过质量门，可进入实现",
+  "created_at": "2026-08-26T11:50:40.105Z",
+  "started_at": "2026-08-26T11:50:40.106Z",
+  "ended_at": "2026-08-26T12:15:13.077Z",
+  "sealed_at": "2026-08-26T12:15:13.077Z"
+}

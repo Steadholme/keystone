@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-134135-yz4r",
+  "startedAt": "2026-08-26T11:41:35.710Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: SQLite migrations and table definitions for users, sessions, Passkeys, OAuth clients, PATs, or other non-human credentials\nSCOPE: /root/w33d_infra/keystone\nEXCLUDE: .env, secrets, vendor, node_modules, build artifacts\nATTENTION: Rust project; identify migration ordering, constraints, and repository access patterns\nEXPECTED: file:line list with table names, required columns, indexes, and migration runner",
+    "FIND: Operator-facing provisioning and credential rotation patterns for managed identities or service-to-service authentication\nSCOPE: /root/w33d_infra/keystone\nEXCLUDE: .env, secrets, vendor, node_modules, build artifacts\nATTENTION: Rust binary startup, CLI subcommands, admin/internal routes, configuration seeding, and audit logging\nEXPECTED: file:line list plus concise control-flow summary",
+    "FIND: Tests that establish database migration, account lifecycle, Passkey/session isolation, bearer token hashing, revocation, expiry, and authorization behavior\nSCOPE: /root/w33d_infra/keystone\nEXCLUDE: .env, secrets, vendor, node_modules, build artifacts\nATTENTION: identify reusable fixture and assertion patterns\nEXPECTED: file:line list grouped by behavior"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 4,
+  "durationMs": 652,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: SQLite migrations and table definitions for users, sessions, Passkeys, OAuth clients, PATs, or other non-human credentials\nSCOPE: /root/w33d_infra/keystone\nEXCLUDE: .env, secrets, vendor, node_modules, build artifacts\nATTENTION: Rust project; identify migration ordering, constraints, and repository access patterns\nEXPECTED: file:line list with table names, required columns, indexes, and migration runner",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 638,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Operator-facing provisioning and credential rotation patterns for managed identities or service-to-service authentication\nSCOPE: /root/w33d_infra/keystone\nEXCLUDE: .env, secrets, vendor, node_modules, build artifacts\nATTENTION: Rust binary startup, CLI subcommands, admin/internal routes, configuration seeding, and audit logging\nEXPECTED: file:line list plus concise control-flow summary",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 614,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: Tests that establish database migration, account lifecycle, Passkey/session isolation, bearer token hashing, revocation, expiry, and authorization behavior\nSCOPE: /root/w33d_infra/keystone\nEXCLUDE: .env, secrets, vendor, node_modules, build artifacts\nATTENTION: identify reusable fixture and assertion patterns\nEXPECTED: file:line list grouped by behavior",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 613,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

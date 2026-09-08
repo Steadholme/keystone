@@ -1,0 +1,80 @@
+{
+  "id": "exp-20260826-150603-li9o",
+  "startedAt": "2026-08-26T13:06:03.461Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: 当前未提交 diff 中 service principal 的 MemoryStore 与 PgStore create、get 和事件序列实现，并核对行为对称性\\nSCOPE: src/store.rs\\nATTENTION: Rust、PostgreSQL、principal-only、事务与迁移\\nEXPECTED: file:line、事务边界、差异",
+    "FIND: 当前未提交 diff 中 service-principal operator 的 create 命令、参数验证和时间边界\\nSCOPE: src/main.rs, src/operator.rs\\nATTENTION: Rust clap、principal-only\\nEXPECTED: file:line 与 correctness 风险"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 2,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 621,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: 当前未提交 diff 中 service principal 的 MemoryStore 与 PgStore create、get 和事件序列实现，并核对行为对称性\\nSCOPE: src/store.rs\\nATTENTION: Rust、PostgreSQL、principal-only、事务与迁移\\nEXPECTED: file:line、事务边界、差异",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 596,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: 当前未提交 diff 中 service-principal operator 的 create 命令、参数验证和时间边界\\nSCOPE: src/main.rs, src/operator.rs\\nATTENTION: Rust clap、principal-only\\nEXPECTED: file:line 与 correctness 风险",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 595,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

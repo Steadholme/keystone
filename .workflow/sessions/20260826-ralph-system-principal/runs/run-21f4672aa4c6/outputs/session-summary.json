@@ -1,0 +1,35 @@
+{
+  "_meta": {
+    "kind": "session-summary",
+    "schema": "session-summary/1.0",
+    "role": "primary",
+    "alias": "session-summary"
+  },
+  "objective": "在 Keystone 中实现不可交互登录的 system service principal，并创建首个默认零授权实例",
+  "status": "completed",
+  "outcome": {
+    "principal": "system",
+    "canonical_subject": "service:system",
+    "interactive_login": false,
+    "credentials": false,
+    "authorization_grants": 0,
+    "production_health": "healthy",
+    "source_commit": "3f9a305a9e5a183568573dea2b24f6eb0d6b968a",
+    "dual_push": true
+  },
+  "verification": [
+    "cargo fmt、clippy 与全量 Rust 测试通过",
+    "隔离 PostgreSQL 18 迁移、回滚与 schema 测试通过",
+    "生产 UAT 5/5 通过",
+    "独立安全与正确性复核均为零发现",
+    "Loom 与 GitHub main 指向同一部署 commit"
+  ],
+  "recorded_decisions": [
+    "S-20260826-g85c：System principal 与应用服务身份",
+    "S-20260826-ahrd：System credential 两阶段激活门"
+  ],
+  "deferred": [
+    "Rikune 集成阶段再设计 per-app principal。",
+    "credential 必须采用 pending -> secure deliver -> active，并具备有限轮换与可审计 introspection。"
+  ]
+}

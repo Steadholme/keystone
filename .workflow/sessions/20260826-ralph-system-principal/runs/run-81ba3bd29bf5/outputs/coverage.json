@@ -1,0 +1,10 @@
+{
+  "_meta": {
+    "kind": "coverage",
+    "schema": "coverage/1.0",
+    "role": "evidence"
+  },
+  "requirement_coverage": 1.0,
+  "scenario_coverage": 1.0,
+  "uncovered": []
+}

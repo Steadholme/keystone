@@ -1,0 +1,20 @@
+{
+  "_meta": {"kind": "plan-task", "schema": "plan-task/1.0", "role": "attachment"},
+  "id": "TASK-002",
+  "title": "实现离线 operator CLI 与 0600 secret 输出",
+  "requirement_refs": ["D2", "D3", "D5"],
+  "depends_on": ["TASK-001"],
+  "files": ["src/main.rs", "src/operator.rs", "README.md"],
+  "read_first": ["src/main.rs", "src/keys.rs", "src/store.rs", "README.md"],
+  "implementation": [
+    "增加 keystone service-principal create、credential-add、credential-revoke、disable 四个离线子命令，所有命令要求 DATABASE_URL 与显式 actor。",
+    "credential-add 强制 expires-at 和 SERVICE_CREDENTIAL_OUTPUT_ROOT；以 create_new(true)、Unix mode 0600 写文件，拒绝相对路径、已存在目标和 root 外路径。",
+    "plaintext credential 不写 stdout、stderr、tracing、数据库或 argv；持久化失败删除输出文件，文件写入失败撤销 credential 并返回非零。"
+  ],
+  "acceptance": ["CLI 不初始化 HTTP listener；create 默认无 credential；secret 文件权限精确为 0600。"],
+  "convergence": {"criteria": [
+    "cargo test --bin keystone operator::tests 退出码为 0。",
+    "rg -n 'service-principal|credential-add|credential-revoke|create_new\\(true\\)|0o600' src/main.rs src/operator.rs 全部命中。"
+  ]},
+  "status": "pending"
+}

@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "kind": "acceptance",
+    "schema": "acceptance/1.0",
+    "role": "evidence"
+  },
+  "status": "accepted",
+  "criteria": {
+    "structural_no_login": true,
+    "zero_credentials": true,
+    "zero_authorization": true,
+    "durable_create_audit": true,
+    "single_active_deployment": true,
+    "dual_remote_push": true,
+    "public_sso_regression_free": true
+  }
+}

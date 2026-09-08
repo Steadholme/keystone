@@ -1,0 +1,86 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_7c5ec571-551c-4a85-9ec4-3e4e8b594e1d",
+  "request_id": "req-system-auto-test-complete-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 21,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 20,
+  "revision_after": 21,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "L0-L3 test pipeline converged with explicit PostgreSQL execution",
+  "evidence_refs": [
+    "deploy:production-authority-pass",
+    "test:full-rust-pass",
+    "test:isolated-pg18-keystone-pass"
+  ],
+  "recorded_at": "2026-08-26T13:22:13.999Z",
+  "result": {
+    "operation": "run-complete-and-seal",
+    "run_id": "run-2223e9e563f0",
+    "run_revision": 2,
+    "status": "sealed",
+    "orchestration_revision": 21,
+    "artifact_publication": {
+      "authority": "transition-receipt/2.0",
+      "artifact_registry_revision": 5,
+      "artifact_ids": [
+        "ART-2dcc6373f8d77ae09540",
+        "ART-d994afbba69bfe6f6326"
+      ],
+      "primary_artifact_id": "ART-2dcc6373f8d77ae09540",
+      "artifacts": {
+        "ART-2dcc6373f8d77ae09540": {
+          "kind": "auto-test-report",
+          "role": "primary",
+          "producer_run_id": "run-2223e9e563f0",
+          "relative_path": "runs/run-2223e9e563f0/outputs/auto-test-report.json",
+          "media_type": "application/json",
+          "schema_version": "auto-test-report/1.0",
+          "content_hash": "879ad4e55177ecb6300549e5722f56bcff5d5416a4906ecbce2f6b389bace6c3",
+          "size": 622,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-d994afbba69bfe6f6326": {
+          "kind": "traceability",
+          "role": "evidence",
+          "producer_run_id": "run-2223e9e563f0",
+          "relative_path": "runs/run-2223e9e563f0/outputs/traceability.md",
+          "media_type": "text/markdown",
+          "schema_version": "traceability/1.0",
+          "content_hash": "f50da54326565993c3bd6ef19238845df28d649b2b2bc839f2f849018c9ce45e",
+          "size": 545,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        }
+      },
+      "aliases": {
+        "latest-auto-test": "ART-2dcc6373f8d77ae09540"
+      }
+    },
+    "output_warnings": [],
+    "next_step_id": "system-test",
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Run sealed; explicit run next may allocate the next chain Run"
+    },
+    "knowledge_reconciliation": {
+      "schema_version": "knowledge-reconciliation-receipt/1.0",
+      "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retrieval_mode": "lexical-kg",
+      "candidates": 0,
+      "duplicates": 0,
+      "conflicts": 0,
+      "review_required": 0,
+      "suppressed": 0,
+      "review_command": "maestro knowledge review 20260826-ralph-system-principal"
+    }
+  }
+}

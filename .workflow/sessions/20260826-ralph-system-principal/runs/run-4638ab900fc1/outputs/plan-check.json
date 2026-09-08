@@ -1,0 +1,10 @@
+{
+  "_meta": {"kind": "plan-check", "schema": "plan-check/1.0", "role": "evidence"},
+  "verdict": "PASS",
+  "requirements_coverage": 1.0,
+  "dependency_correctness": "acyclic",
+  "collision_safety": "clear",
+  "pressure_pass": {"task_id": "TASK-001", "result": "PASS", "checks": ["atomic state/event transaction", "event-failure rollback", "Memory/Pg parity"]},
+  "resolved_concerns": ["removed dangling SID", "added event rollback", "added inactive HTTP contract", "added additive-only rollback boundary"],
+  "residual_risks": ["生产发布需在 stop-old 后通过 quiesced gate，禁止 mixed-version writer。"]
+}

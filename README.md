@@ -425,3 +425,30 @@ tombstone 永不物删。落后到 `after < retention_floor_cursor` 返回
 5. 端到端 OIDC：让 Sluice 发起 `GET https://id.w33d.xyz/authorize?...`（PKCE S256）。未登录会先 302 到 `/login`；完成上面的登录后回到 `/authorize` 即 302 携 `code` 回跳 `https://id.w33d.xyz/callback`，再由 `/token`、`/userinfo` 完成。
 
 > 说明：因引入 `webauthn-rs`（其 `webauthn-rs-core` 依赖 OpenSSL），构建镜像的 builder 阶段新增 `libssl-dev`/`pkg-config`，runtime 阶段新增 `libssl3`/`ca-certificates`（见 `Dockerfile`）。
+
+## Frontend (v2, 2026-09-08)
+
+The auth and console surfaces follow the shared Steadholme v2 system implemented
+from the Figma file `dNXYZhKuhBKANOQdjkALoF` (Keystone, slate accent).
+
+`static/app.css` is generated: this repo's own layer unchanged, then a retint.
+Keystone owns its own token vocabulary — `--surface`, `--text`, `--accent`,
+`--border`, `--radius`, `--shadow-*` — rather than the shared names, so the
+kit's `:root` never reaches it. Re-pointing those names at the end of the file
+repaints the whole surface without touching a structural rule.
+
+The brand panel is the design's keep panel: one flat navy field with the brand
+lockup at the top, the Keystone headline and three fact rows at the bottom, and
+a keystone-arch watermark. The fact rows state what the server actually is —
+passkeys over WebAuthn with the relying party, OIDC with PKCE S256 and RS256
+JWKS, self-hosted with an eight-hour session — replacing the marketing chips.
+
+Vocabulary follows the estate rule that every visible string is a name, a value
+or an action. The "SOVEREIGN IDENTITY" eyebrow, the "Secure access to the keep."
+line and the sign-in card's restatement of its own two buttons are gone; the
+card head now carries the factor pills and the relying party instead. The
+instruction lines on the register, reset and forgot cards stay: they tell the
+reader what the field wants, which is not a slogan.
+
+`src/bin/keystone_fixture.rs` serves the app on 127.0.0.1:9140 from the
+in-memory store with no database and no egress.

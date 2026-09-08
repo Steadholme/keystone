@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-145428-9tj1",
+  "startedAt": "2026-08-26T12:54:28.927Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: MemoryStore 与 PgStore 中 service principal 的 create、issue credential、revoke credential、disable 和事件序列实现，并核对行为对称性\\nSCOPE: src/store.rs\\nATTENTION: Rust、PostgreSQL、事务与并发竞态\\nEXPECTED: 每个方法的 file:line、事务边界与关键差异",
+    "FIND: service principal operator 命令的 create、credential-add、credential-revoke、disable 语义以及过期时间边界处理\\nSCOPE: src/main.rs, src/operator.rs\\nATTENTION: Rust clap、离线 operator、失败补偿\\nEXPECTED: file:line 与潜在 correctness 风险",
+    "FIND: service principal schema migration、event sequence 分配及约束定义\\nSCOPE: src/store.rs\\nATTENTION: PostgreSQL 并发、唯一约束、外键、时间字段\\nEXPECTED: file:line 与可证明的竞态结论"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 806,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: MemoryStore 与 PgStore 中 service principal 的 create、issue credential、revoke credential、disable 和事件序列实现，并核对行为对称性\\nSCOPE: src/store.rs\\nATTENTION: Rust、PostgreSQL、事务与并发竞态\\nEXPECTED: 每个方法的 file:line、事务边界与关键差异",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 788,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: service principal operator 命令的 create、credential-add、credential-revoke、disable 语义以及过期时间边界处理\\nSCOPE: src/main.rs, src/operator.rs\\nATTENTION: Rust clap、离线 operator、失败补偿\\nEXPECTED: file:line 与潜在 correctness 风险",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 779,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: service principal schema migration、event sequence 分配及约束定义\\nSCOPE: src/store.rs\\nATTENTION: PostgreSQL 并发、唯一约束、外键、时间字段\\nEXPECTED: file:line 与可证明的竞态结论",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 644,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

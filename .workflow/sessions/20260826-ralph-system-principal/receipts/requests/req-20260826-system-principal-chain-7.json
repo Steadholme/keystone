@@ -1,0 +1,7 @@
+{
+  "schema_version": "request-receipt/2.0",
+  "request_id": "req-20260826-system-principal-chain-7",
+  "participant_id": "workspace-owner",
+  "payload_hash": "sha256:700011c33ed4e66f6c961f0a9a431b85c348776302e93816e7d68dcf28cd1ee1",
+  "transition_receipt_ref": "receipts/transitions/000000000008-chain-req-20260826-system-principal-chain-7.json"
+}

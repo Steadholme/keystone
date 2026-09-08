@@ -1,0 +1,29 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_0cec4c81-0972-4214-a104-b9547f734a57",
+  "request_id": "req-system-post-test-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 24,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 23,
+  "revision_after": 24,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "formal production acceptance passed every mapped scenario",
+  "evidence_refs": [
+    "ART-32ce77d2a0c96b14f3fe",
+    "ART-af8aea3e6fac6ab27df2"
+  ],
+  "recorded_at": "2026-08-26T13:24:22.348Z",
+  "result": {
+    "point_id": "post-test",
+    "status": "resolved",
+    "orchestration_revision": 24,
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Decision recorded — run next may advance the chain"
+    }
+  }
+}

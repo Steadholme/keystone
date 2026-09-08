@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-150559-5ski",
+  "startedAt": "2026-08-26T13:05:59.335Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Every current uncommitted production code path for service principals, including schema, Store methods, CLI commands, HTTP routes, credential or token generation, introspection, and migration invocation.\\nSCOPE: src/store.rs, src/operator.rs, src/main.rs, src/lib.rs, src/handlers/\\nATTENTION: Rust Axum SQLx; verify principal-only release and structural separation from users.\\nEXPECTED: file:line inventory with security boundary notes",
+    "FIND: Tests proving a service principal has zero credentials and cannot enter password, Passkey, SSO, session, admin, or authorization grant flows.\\nSCOPE: tests/service_principal_isolation.rs, tests/service_principal_store.rs, src/auth.rs, src/handlers/login.rs, src/handlers/webauthn.rs, src/handlers/admin.rs\\nATTENTION: Distinguish direct proof from assumptions and identify any missing negative coverage.\\nEXPECTED: file:line guarantee matrix",
+    "FIND: Durable schema and audit operations for principal create and disable, including transaction boundaries, uniqueness, event sequencing, input validation, and any implicit migration.\\nSCOPE: src/store.rs, src/operator.rs, src/main.rs\\nATTENTION: PostgreSQL/in-memory parity, SQL injection, audit atomicity, no credential tables.\\nEXPECTED: file:line list with any security weakness"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 674,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Every current uncommitted production code path for service principals, including schema, Store methods, CLI commands, HTTP routes, credential or token generation, introspection, and migration invocation.\\nSCOPE: src/store.rs, src/operator.rs, src/main.rs, src/lib.rs, src/handlers/\\nATTENTION: Rust Axum SQLx; verify principal-only release and structural separation from users.\\nEXPECTED: file:line inventory with security boundary notes",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 641,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Tests proving a service principal has zero credentials and cannot enter password, Passkey, SSO, session, admin, or authorization grant flows.\\nSCOPE: tests/service_principal_isolation.rs, tests/service_principal_store.rs, src/auth.rs, src/handlers/login.rs, src/handlers/webauthn.rs, src/handlers/admin.rs\\nATTENTION: Distinguish direct proof from assumptions and identify any missing negative coverage.\\nEXPECTED: file:line guarantee matrix",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 636,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: Durable schema and audit operations for principal create and disable, including transaction boundaries, uniqueness, event sequencing, input validation, and any implicit migration.\\nSCOPE: src/store.rs, src/operator.rs, src/main.rs\\nATTENTION: PostgreSQL/in-memory parity, SQL injection, audit atomicity, no credential tables.\\nEXPECTED: file:line list with any security weakness",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 639,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "_meta": {"kind": "execution-waves", "schema": "execution-waves/1.0", "role": "attachment"},
+  "waves": [
+    {"id": "WAVE-001", "tasks": ["TASK-001"], "depends_on": []},
+    {"id": "WAVE-002", "tasks": ["TASK-002", "TASK-003"], "depends_on": ["WAVE-001"]},
+    {"id": "WAVE-003", "tasks": ["TASK-004"], "depends_on": ["WAVE-002"]}
+  ],
+  "write_collisions": []
+}

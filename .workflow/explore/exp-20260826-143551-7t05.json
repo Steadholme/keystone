@@ -1,0 +1,80 @@
+{
+  "id": "exp-20260826-143551-7t05",
+  "startedAt": "2026-08-26T12:35:51.566Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Route registration and conditional exposure of the service principal introspection endpoint, including whether INTERNAL_TLS gates registration on the mTLS listener.\\nSCOPE: src/lib.rs, src/handlers/mod.rs, src/handlers/service_introspect.rs\\nATTENTION: Rust Axum; distinguish listener construction from request-time header checks.\\nEXPECTED: file:line evidence and call chain",
+    "FIND: Credential parsing, constant-time comparison, token-shape validation, inactive response uniformity, backend-error handling, cache/privacy headers, and body-size limits for service introspection.\\nSCOPE: src/handlers/service_introspect.rs, tests/service_principal_introspection.rs\\nATTENTION: security review; fail closed and avoid credential enumeration.\\nEXPECTED: file:line evidence grouped by concern"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 2,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 1093,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Route registration and conditional exposure of the service principal introspection endpoint, including whether INTERNAL_TLS gates registration on the mTLS listener.\\nSCOPE: src/lib.rs, src/handlers/mod.rs, src/handlers/service_introspect.rs\\nATTENTION: Rust Axum; distinguish listener construction from request-time header checks.\\nEXPECTED: file:line evidence and call chain",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 582,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Credential parsing, constant-time comparison, token-shape validation, inactive response uniformity, backend-error handling, cache/privacy headers, and body-size limits for service introspection.\\nSCOPE: src/handlers/service_introspect.rs, tests/service_principal_introspection.rs\\nATTENTION: security review; fail closed and avoid credential enumeration.\\nEXPECTED: file:line evidence grouped by concern",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 1073,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

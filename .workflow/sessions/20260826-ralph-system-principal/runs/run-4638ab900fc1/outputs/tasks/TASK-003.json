@@ -1,0 +1,21 @@
+{
+  "_meta": {"kind": "plan-task", "schema": "plan-task/1.0", "role": "attachment"},
+  "id": "TASK-003",
+  "title": "实现 INTERNAL_TLS 与 gateway Basic 双门 introspection",
+  "requirement_refs": ["D1", "D2", "D4", "D5"],
+  "depends_on": ["TASK-001"],
+  "files": ["src/lib.rs", "src/handlers/mod.rs", "src/handlers/service_introspect.rs", "tests/service_principal_introspection.rs"],
+  "read_first": ["src/lib.rs", "src/config.rs", "src/auth.rs", "src/handlers/introspect.rs", "tests/pat_introspection.rs", "src/store.rs"],
+  "implementation": [
+    "仅在 state.config.internal_tls=true 时挂载 POST /internal/v1/service-credentials/introspect，并复用 GW_CLIENT_ID/GW_CLIENT_SECRET constant-time Basic 校验。",
+    "有效 svc_ credential 返回 active、service: subject、scope、exp、Bearer；invalid/revoked/expired/disabled 统一 200 active=false，Store backend error 返回 503。",
+    "所有响应设置 Cache-Control: private, no-store 与 Vary: Authorization；测试覆盖 route-off 404、Basic 401、未配置 503、body limit 和 PostgreSQL。"
+  ],
+  "acceptance": ["双门通过时四类 inactive 状态均为 HTTP 200 与 {\"active\":false}；数据库不确定性不伪装 inactive。"],
+  "convergence": {"criteria": [
+    "cargo test --test service_principal_introspection 退出码为 0。",
+    "TEST_DATABASE_URL=\"$TEST_DATABASE_URL\" cargo test --test service_principal_introspection -- --test-threads=1 退出码为 0。",
+    "rg -n '/internal/v1/service-credentials/introspect|temporarily_unavailable|active: false' src/lib.rs src/handlers/service_introspect.rs 全部命中。"
+  ]},
+  "status": "pending"
+}

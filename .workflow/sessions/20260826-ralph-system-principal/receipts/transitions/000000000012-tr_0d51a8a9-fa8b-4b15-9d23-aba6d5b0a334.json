@@ -1,0 +1,44 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_0d51a8a9-fa8b-4b15-9d23-aba6d5b0a334",
+  "request_id": "req-20260826-system-principal-next-plan-v1",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 12,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 11,
+  "revision_after": 12,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "分析通过，进入可执行计划编制",
+  "evidence_refs": [
+    "ART-0ad3d9cd35fed5945a05"
+  ],
+  "recorded_at": "2026-08-26T11:50:40.106Z",
+  "result": {
+    "run_id": "run-4638ab900fc1",
+    "run_dir": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-4638ab900fc1",
+    "step_id": "system-plan",
+    "status": "running",
+    "revision": 1,
+    "upstream": {},
+    "guidance": {
+      "schema_version": "guidance-snapshot/1.0",
+      "source_path": "../../.maestro/prepare/plan.md",
+      "content_hash": "sha256:d6a8923aa3aaaac113825d9002f06b62f7f400c11d41067a326c7cfc14811d9c",
+      "resolved_prompt_hash": "sha256:d6a8923aa3aaaac113825d9002f06b62f7f400c11d41067a326c7cfc14811d9c",
+      "prepare_hash": "sha256:d6a8923aa3aaaac113825d9002f06b62f7f400c11d41067a326c7cfc14811d9c",
+      "workflow_hash": "sha256:ddd6402d158a3c6e17222d302356077f331f2c5c66548da6afffbd94eb3059eb",
+      "run_mode_hash": "sha256:60752b3307697630bc7f6a07c3256100ea5b499d11cdbb38d98d49e9de2563fe"
+    },
+    "knowledge_context": {
+      "path": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-4638ab900fc1/knowledge-delta.json",
+      "revision": 0,
+      "candidate_count": 0
+    },
+    "brief": {
+      "command": "maestro run brief run-4638ab900fc1 --session 20260826-ralph-system-principal"
+    },
+    "run_already_created": true
+  }
+}

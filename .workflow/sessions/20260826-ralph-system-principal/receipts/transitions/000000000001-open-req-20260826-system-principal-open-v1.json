@@ -1,0 +1,36 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "open-req-20260826-system-principal-open-v1",
+  "request_id": "req-20260826-system-principal-open-v1",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 1,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 0,
+  "revision_after": 1,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "用户明确授权先创建不可登录的 system 账户，并已确认最小权限边界",
+  "evidence_refs": [
+    "/root/w33d_infra/strad/.workflow/specs/architecture-constraints.md"
+  ],
+  "recorded_at": "2026-08-26T11:39:56.850Z",
+  "result": {
+    "schema_version": "session/3.0",
+    "session_id": "20260826-ralph-system-principal",
+    "objective": "在 Keystone 中实现不可交互登录的 system service principal，并创建首个默认零授权实例",
+    "definition_of_done": "独立 service principal 与散列凭证模型完成；不存在邮箱、密码、Passkey、浏览器 SSO 或会话入口；内部鉴权默认拒绝且可轮换撤销；测试与安全审查通过；生产创建首个零授权实例且凭证不进入仓库或日志",
+    "status": "open",
+    "orchestration_revision": 1,
+    "activity_revision": 1,
+    "chain": [],
+    "decisions": [],
+    "active_run_ids": [],
+    "artifacts_ref": "artifacts.json",
+    "evidence_ref": "evidence.json",
+    "created_at": "2026-08-26T11:39:56.850Z",
+    "updated_at": "2026-08-26T11:39:56.850Z",
+    "completed_at": null,
+    "archived_at": null
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_9dfa9504-b7da-43b4-934e-7a18da46d58a",
+  "request_id": "req-system-auto-test-next-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 20,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 19,
+  "revision_after": 20,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "start automated test generation stage",
+  "evidence_refs": [
+    "ART-3a12319fc355b89cf514"
+  ],
+  "recorded_at": "2026-08-26T13:21:03.657Z",
+  "result": {
+    "run_id": "run-2223e9e563f0",
+    "run_dir": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-2223e9e563f0",
+    "step_id": "system-auto-test",
+    "status": "running",
+    "revision": 1,
+    "upstream": {},
+    "guidance": {
+      "schema_version": "guidance-snapshot/1.0",
+      "source_path": "../../.maestro/prepare/auto-test.md",
+      "content_hash": "sha256:4a38489168eecc961c5f435cee6df8cc7d41154cbf42f6b3d75409fc099a3313",
+      "resolved_prompt_hash": "sha256:4a38489168eecc961c5f435cee6df8cc7d41154cbf42f6b3d75409fc099a3313",
+      "prepare_hash": "sha256:4a38489168eecc961c5f435cee6df8cc7d41154cbf42f6b3d75409fc099a3313",
+      "workflow_hash": "sha256:70d427eebcd00c06d3d2dcac229ae3ff63af0eed0fa711bc7654997fd217b017",
+      "run_mode_hash": "sha256:60752b3307697630bc7f6a07c3256100ea5b499d11cdbb38d98d49e9de2563fe"
+    },
+    "knowledge_context": {
+      "path": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-2223e9e563f0/knowledge-delta.json",
+      "revision": 0,
+      "candidate_count": 0
+    },
+    "brief": {
+      "command": "maestro run brief run-2223e9e563f0 --session 20260826-ralph-system-principal"
+    },
+    "run_already_created": true
+  }
+}

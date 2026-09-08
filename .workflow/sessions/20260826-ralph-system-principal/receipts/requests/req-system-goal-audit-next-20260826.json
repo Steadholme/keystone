@@ -1,0 +1,7 @@
+{
+  "schema_version": "request-receipt/2.0",
+  "request_id": "req-system-goal-audit-next-20260826",
+  "participant_id": "workspace-owner",
+  "payload_hash": "sha256:c24b532e806ccd2a271ef62a5e7aed97e852d4d2c45fa9e5cc6d5fea73bc8b53",
+  "transition_receipt_ref": "receipts/transitions/000000000025-tr_8eb3a016-5148-4796-b959-8c04b9a6a353.json"
+}

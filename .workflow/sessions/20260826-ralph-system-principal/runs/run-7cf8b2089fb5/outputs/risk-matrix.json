@@ -1,0 +1,23 @@
+{
+  "_meta": {"kind": "risk-matrix", "schema": "risk-matrix/1.0", "role": "evidence"},
+  "schema_version": "risk-matrix/1.0",
+  "session_id": "20260826-ralph-system-principal",
+  "run_id": "run-7cf8b2089fb5",
+  "scale": "1=low, 5=high",
+  "overall": "medium",
+  "dimensions": [
+    {"name": "correctness", "score": 2, "reason": "独立模型清晰；主要风险是双 Store 实现的一致性。", "evidence": ["src/store.rs:625", "src/store.rs:919", "src/store.rs:2748"]},
+    {"name": "security", "score": 2, "reason": "仅存 hash、强制 expiry、mTLS 与 consumer auth；首个实例无 credential。", "evidence": ["src/auth.rs:363", "src/handlers/introspect.rs:41", "src/main.rs:50"]},
+    {"name": "compatibility", "score": 1, "reason": "additive tables 与新 internal route，不改变现有 OIDC/user 行为。", "evidence": ["src/store.rs:2748", "src/lib.rs:55"]},
+    {"name": "operations", "score": 3, "reason": "需要 single-active schema migration、离线 CLI 和 repo 外 secret 文件纪律。", "evidence": ["/root/w33d_infra/deploy/README.md:390"]},
+    {"name": "complexity", "score": 3, "reason": "Store trait、内存与 PostgreSQL、CLI、handler 和 tests 均需同步。", "evidence": ["src/store.rs:625", "src/store.rs:919", "src/store.rs:2717"]},
+    {"name": "reversibility", "score": 1, "reason": "禁用 principal 并撤销 credential 即可前向回滚；additive 表保留 tombstone 与审计。", "evidence": ["src/store.rs:3429"]}
+  ],
+  "controls": [
+    "principal 与 credential management event 同事务提交",
+    "首个 principal 不签发 credential 且无 Verdict grant",
+    "unknown/revoked/expired/disabled 统一 inactive，backend error 为 503",
+    "不做 destructive down migration",
+    "service principal 永不进入 human approval quorum"
+  ]
+}

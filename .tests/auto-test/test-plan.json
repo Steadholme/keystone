@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "source": "code-and-review",
+  "max_iterations": 1,
+  "layers": [
+    {"layer": "L0", "scenario": "memory principal lifecycle and audit rollback"},
+    {"layer": "L1", "scenario": "PostgreSQL migration parity and transactional rollback"},
+    {"layer": "L2", "scenario": "human login, SSO, session and admin isolation"},
+    {"layer": "L3", "scenario": "production single-active health and zero-grant state"}
+  ]
+}

@@ -890,3 +890,111 @@ code {
   border-color: var(--danger-border);
   color: var(--danger);
 }
+
+/* ==========================================================================
+   Keystone v2 · retint onto the shared Steadholme neutral system with the
+   slate accent. Figma dNXYZhKuhBKANOQdjkALoF.
+
+   Keystone owns its OWN token vocabulary (--surface / --text / --accent /
+   --border / --radius / --shadow-*), so the shared kit's :root never reaches
+   it. Re-pointing those names here repaints the whole surface without touching
+   a single structural rule.
+   ========================================================================== */
+:root {
+  /* Neutral canvas + ink */
+  --c-paper-0:#ffffff; --c-paper-25:#f6f7f9; --c-paper-50:#f6f7f9;
+  --c-paper-75:#eef0f4; --c-paper-100:#eef0f4; --c-paper-200:#e5e7ec; --c-paper-300:#d3d7e0;
+  --c-basalt-900:#17191f; --c-basalt-700:#4a5160; --c-basalt-500:#727a8a; --c-basalt-400:#9aa2b1;
+
+  /* The keep panel: one flat navy field, not a gradient with an oxide seam. */
+  --keep-panel:#0f172a; --keep-panel-2:#1e293b; --keep-ink:#e2e8f0; --keep-ink-2:#94a3b8;
+  --brand-900:var(--keep-panel); --brand-800:var(--keep-panel-2); --brand-700:#334155;
+  --brand-grad:var(--keep-panel);
+  --on-brand:var(--keep-ink); --on-brand-muted:var(--keep-ink-2); --on-brand-accent:var(--keep-ink-2);
+
+  /* Slate accent */
+  --accent:#475569; --accent-hover:#334155; --accent-active:#1e293b;
+  --accent-ring:rgba(100,116,139,.30); --accent-soft:#f1f5f9;
+
+  /* Factor families */
+  --factor-passkey:#4f46e5;  --factor-passkey-soft:#e0e7ff;
+  --factor-totp:#0e7490;     --factor-totp-soft:#cffafe;
+  --factor-password:#475569; --factor-password-soft:#f1f5f9;
+  --factor-recovery:#b45309; --factor-recovery-soft:#fef3c7;
+
+  --success:#15803d; --success-soft:#dcfce7; --success-border:#bbf7d0;
+  --danger:#be123c;  --danger-soft:#ffe4e6;  --danger-border:#fecdd3;
+
+  --border:#e5e7ec; --border-strong:#d3d7e0; --grid-line:transparent;
+  --radius-sm:6px; --radius:8px; --radius-lg:12px;
+  --shadow-sm:0 1px 2px rgba(23,25,31,.05);
+  --shadow-md:0 1px 3px rgba(23,25,31,.08),0 1px 2px rgba(23,25,31,.04);
+  --shadow-lg:0 6px 20px rgba(23,25,31,.10);
+}
+
+/* The auth canvas is the plain v2 ground — no paper grid behind the card. */
+.page-auth { background:#f6f7f9; }
+.page-auth::before, .page-auth::after,
+.auth-main::before, .auth-main::after { display:none !important; content:none !important; }
+.auth-main { background:#f6f7f9; background-image:none; }
+
+/* Keep panel: brand at the top, headline + facts at the bottom. */
+.brand-panel { justify-content:space-between; padding:32px; background:var(--keep-panel); }
+.brand-panel__top { flex:0 0 auto; }
+.brand-panel__inner { flex:0 0 auto; }
+.brand-panel .brand { display:inline-flex; align-items:center; gap:10px; text-decoration:none; }
+.brand__tile {
+  width:32px; height:32px; border-radius:8px; display:inline-flex; align-items:center;
+  justify-content:center; background:var(--keep-panel-2); color:var(--keep-ink);
+}
+.brand__tile svg { width:18px; height:18px; }
+.brand__id { display:flex; flex-direction:column; line-height:1.2; }
+.brand__id b { font-size:14px; font-weight:650; color:var(--keep-ink); }
+.brand__id span { font-family:var(--mono,ui-monospace,monospace); font-size:11px; color:var(--keep-ink-2); }
+.brand__headline {
+  margin:0 0 20px; font-size:38px; line-height:44px; font-weight:650; letter-spacing:-.03em;
+  color:var(--keep-ink);
+}
+.brand-facts { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.brand-facts li { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--keep-ink-2); }
+.brand-facts svg { width:16px; height:16px; flex:0 0 auto; }
+.brand-panel__foot { margin:24px 0 0; font-size:12px; color:var(--keep-ink-2); display:flex; gap:14px; }
+.brand-panel__foot a { color:var(--keep-ink-2); }
+.brand-watermark {
+  position:absolute; right:-40px; bottom:-30px; width:340px; height:340px;
+  color:var(--keep-ink); opacity:.07; pointer-events:none;
+}
+
+/* Auth card + factor pills */
+.auth-card { border-radius:12px; box-shadow:var(--shadow-md); }
+.auth-card__title { font-size:24px; line-height:30px; letter-spacing:-.02em; font-weight:650; }
+.auth-card__factors { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.auth-card__rp { margin-left:auto; font-family:var(--mono,ui-monospace,monospace); font-size:12px; color:var(--text-subtle); }
+.factor {
+  display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 9px; border-radius:999px;
+  font-size:12px; font-weight:600; background:var(--factor-password-soft); color:var(--factor-password);
+}
+.factor::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.factor--passkey  { background:var(--factor-passkey-soft);  color:var(--factor-passkey); }
+.factor--totp     { background:var(--factor-totp-soft);     color:var(--factor-totp); }
+.factor--password { background:var(--factor-password-soft); color:var(--factor-password); }
+.factor--recovery { background:var(--factor-recovery-soft); color:var(--factor-recovery); }
+
+/* Controls: the design's 44px hero and 8px radii. */
+.btn { border-radius:8px; }
+.btn-hero { height:44px; }
+input[type=text], input[type=email], input[type=password], input[type=tel], select, textarea {
+  border-radius:8px;
+}
+
+/* The panel already carries © / Status / Privacy; the card column repeating it
+   is the same three links twice on one screen. */
+.page-auth .auth-main .site-foot { display:none; }
+.divider span { text-transform:none; letter-spacing:0; font-size:12px; }
+.brand-watermark { right:-70px; bottom:-70px; width:300px; height:300px; opacity:.06; }
+@media (max-width:900px) {
+  .brand-panel { padding:20px 16px; }
+  .brand__headline { font-size:26px; line-height:32px; margin-bottom:12px; }
+  .brand-watermark { display:none; }
+  .page-auth .auth-main .site-foot { display:flex; }
+}

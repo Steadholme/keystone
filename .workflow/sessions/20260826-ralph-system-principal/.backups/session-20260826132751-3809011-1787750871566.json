@@ -1,0 +1,184 @@
+{
+  "schema_version": "session/3.0",
+  "session_id": "20260826-ralph-system-principal",
+  "objective": "在 Keystone 中实现不可交互登录的 system service principal，并创建首个默认零授权实例",
+  "definition_of_done": "独立 service principal 与散列凭证模型完成；不存在邮箱、密码、Passkey、浏览器 SSO 或会话入口；内部鉴权默认拒绝且可轮换撤销；测试与安全审查通过；生产创建首个零授权实例且凭证不进入仓库或日志",
+  "status": "open",
+  "orchestration_revision": 26,
+  "activity_revision": 26,
+  "chain": [
+    {
+      "step_id": "system-analyze",
+      "command": "analyze",
+      "args": [
+        "--session",
+        "{session}"
+      ],
+      "status": "completed",
+      "run_ids": [
+        "run-7cf8b2089fb5"
+      ],
+      "goal_ref": null,
+      "decision_ref": null,
+      "decision_refs": [],
+      "stage": "analyze"
+    },
+    {
+      "step_id": "system-plan",
+      "command": "plan",
+      "args": [
+        "--session",
+        "{session}"
+      ],
+      "status": "completed",
+      "run_ids": [
+        "run-4638ab900fc1"
+      ],
+      "goal_ref": null,
+      "decision_ref": null,
+      "decision_refs": [],
+      "stage": "plan"
+    },
+    {
+      "step_id": "system-execute",
+      "command": "execute",
+      "args": [
+        "--session",
+        "{session}"
+      ],
+      "status": "completed",
+      "run_ids": [
+        "run-bd70fc48c8a1"
+      ],
+      "goal_ref": null,
+      "decision_ref": "post-execute",
+      "decision_refs": [
+        "post-execute"
+      ],
+      "stage": "execute"
+    },
+    {
+      "step_id": "system-review",
+      "command": "review",
+      "args": [
+        "--session",
+        "{session}"
+      ],
+      "status": "completed",
+      "run_ids": [
+        "run-e2b28dfa28d4"
+      ],
+      "goal_ref": null,
+      "decision_ref": "post-review",
+      "decision_refs": [
+        "post-review"
+      ],
+      "stage": "review"
+    },
+    {
+      "step_id": "system-auto-test",
+      "command": "auto-test",
+      "args": [
+        "--session",
+        "{session}"
+      ],
+      "status": "completed",
+      "run_ids": [
+        "run-2223e9e563f0"
+      ],
+      "goal_ref": null,
+      "decision_ref": null,
+      "decision_refs": [],
+      "stage": "test-gen"
+    },
+    {
+      "step_id": "system-test",
+      "command": "test",
+      "args": [
+        "--session",
+        "{session}"
+      ],
+      "status": "completed",
+      "run_ids": [
+        "run-81ba3bd29bf5"
+      ],
+      "goal_ref": null,
+      "decision_ref": "post-test",
+      "decision_refs": [
+        "post-test"
+      ],
+      "stage": "test"
+    },
+    {
+      "step_id": "system-goal-audit",
+      "command": "goal-audit",
+      "args": [],
+      "status": "completed",
+      "run_ids": [
+        "run-fc5b9c78227e"
+      ],
+      "goal_ref": null,
+      "decision_ref": "post-goal-audit",
+      "decision_refs": [],
+      "stage": "goal-audit"
+    },
+    {
+      "step_id": "system-session-complete",
+      "command": "session-complete",
+      "args": [],
+      "status": "pending",
+      "run_ids": [],
+      "goal_ref": null,
+      "decision_ref": "post-execution",
+      "decision_refs": [],
+      "stage": "session-complete"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "post-execute",
+      "after_step_id": "system-execute",
+      "status": "resolved",
+      "evidence_refs": [
+        "ART-1ea2149c426a6d09e3f2",
+        "ART-69513c9d99415ca72aa9"
+      ]
+    },
+    {
+      "decision_id": "post-review",
+      "after_step_id": "system-review",
+      "status": "resolved",
+      "evidence_refs": [
+        "ART-3a12319fc355b89cf514"
+      ]
+    },
+    {
+      "decision_id": "post-test",
+      "after_step_id": "system-test",
+      "status": "resolved",
+      "evidence_refs": [
+        "ART-32ce77d2a0c96b14f3fe",
+        "ART-af8aea3e6fac6ab27df2"
+      ]
+    },
+    {
+      "decision_id": "post-goal-audit",
+      "after_step_id": "system-goal-audit",
+      "status": "open",
+      "evidence_refs": []
+    },
+    {
+      "decision_id": "post-execution",
+      "after_step_id": "system-session-complete",
+      "status": "open",
+      "evidence_refs": []
+    }
+  ],
+  "active_run_ids": [],
+  "artifacts_ref": "artifacts.json",
+  "evidence_ref": "evidence.json",
+  "created_at": "2026-08-26T11:39:56.850Z",
+  "updated_at": "2026-08-26T13:27:13.102Z",
+  "completed_at": null,
+  "archived_at": null
+}

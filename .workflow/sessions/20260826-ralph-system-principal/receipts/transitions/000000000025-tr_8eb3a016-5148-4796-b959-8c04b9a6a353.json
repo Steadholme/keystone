@@ -1,0 +1,44 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_8eb3a016-5148-4796-b959-8c04b9a6a353",
+  "request_id": "req-system-goal-audit-next-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 25,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 24,
+  "revision_after": 25,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "start goal-backward audit",
+  "evidence_refs": [
+    "ART-32ce77d2a0c96b14f3fe"
+  ],
+  "recorded_at": "2026-08-26T13:24:31.679Z",
+  "result": {
+    "run_id": "run-fc5b9c78227e",
+    "run_dir": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-fc5b9c78227e",
+    "step_id": "system-goal-audit",
+    "status": "running",
+    "revision": 1,
+    "upstream": {},
+    "guidance": {
+      "schema_version": "guidance-snapshot/1.0",
+      "source_path": "",
+      "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "resolved_prompt_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "prepare_hash": null,
+      "workflow_hash": null,
+      "run_mode_hash": "sha256:60752b3307697630bc7f6a07c3256100ea5b499d11cdbb38d98d49e9de2563fe"
+    },
+    "knowledge_context": {
+      "path": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-fc5b9c78227e/knowledge-delta.json",
+      "revision": 0,
+      "candidate_count": 0
+    },
+    "brief": {
+      "command": "maestro run brief run-fc5b9c78227e --session 20260826-ralph-system-principal"
+    },
+    "run_already_created": true
+  }
+}

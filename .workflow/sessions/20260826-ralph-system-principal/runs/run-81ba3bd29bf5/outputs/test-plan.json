@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "kind": "test-plan",
+    "schema": "test-plan/1.0",
+    "role": "attachment"
+  },
+  "mode": "production-smoke",
+  "scenarios": [
+    {"id": "UAT-001", "source": "requirement", "expected": "exactly one healthy candidate Keystone instance"},
+    {"id": "UAT-002", "source": "requirement", "expected": "one active identity anchor, one create event, no user row, no credential schema"},
+    {"id": "UAT-003", "source": "requirement", "expected": "zero Verdict tuple, policy edge, or lifecycle rows"},
+    {"id": "UAT-004", "source": "requirement", "expected": "public SSO health and issuer remain valid"},
+    {"id": "UAT-005", "source": "requirement", "expected": "Loom and GitHub main resolve to deployed source commit"}
+  ]
+}

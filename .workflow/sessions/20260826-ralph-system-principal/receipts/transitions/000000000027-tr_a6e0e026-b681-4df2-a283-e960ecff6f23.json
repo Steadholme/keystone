@@ -1,0 +1,28 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_a6e0e026-b681-4df2-a283-e960ecff6f23",
+  "request_id": "req-post-goal-audit-20260826-01",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 27,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 26,
+  "revision_after": 27,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "目标审计确认当前用户授权范围已完整达成",
+  "evidence_refs": [
+    "ART-0803469cec90839c9d06"
+  ],
+  "recorded_at": "2026-08-26T13:27:51.548Z",
+  "result": {
+    "point_id": "post-goal-audit",
+    "status": "resolved",
+    "orchestration_revision": 27,
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Decision recorded — run next may advance the chain"
+    }
+  }
+}

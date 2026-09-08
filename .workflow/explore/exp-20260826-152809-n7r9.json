@@ -1,0 +1,48 @@
+{
+  "id": "exp-20260826-152809-n7r9",
+  "startedAt": "2026-08-26T13:28:09.556Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Completed session-complete Run artifacts that show required output metadata and report frontmatter\\nSCOPE: .workflow/sessions/\\nEXPECTED: exact paths plus schema, kind, role, and alias fields"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 1,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 637,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Completed session-complete Run artifacts that show required output metadata and report frontmatter\\nSCOPE: .workflow/sessions/\\nEXPECTED: exact paths plus schema, kind, role, and alias fields",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 614,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

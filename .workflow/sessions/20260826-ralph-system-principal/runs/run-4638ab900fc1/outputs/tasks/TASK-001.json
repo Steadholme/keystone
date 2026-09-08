@@ -1,0 +1,24 @@
+{
+  "_meta": {"kind": "plan-task", "schema": "plan-task/1.0", "role": "attachment"},
+  "id": "TASK-001",
+  "title": "建立 service principal schema、Store 与 durable events",
+  "requirement_refs": ["D1", "D2", "D3", "D5"],
+  "depends_on": [],
+  "files": ["src/store.rs", "tests/service_principal_store.rs"],
+  "read_first": ["src/store.rs", "tests/pg_store.rs", "tests/pat_introspection.rs", ".workflow/sessions/20260826-ralph-system-principal/runs/run-7cf8b2089fb5/outputs/findings.json"],
+  "implementation": [
+    "新增独立 service_principals、service_principal_credentials、service_principal_events additive tables；subject 固定为 service:<id>，禁止写入 users。",
+    "credential 使用 svc_ 加 32-byte CSPRNG，数据库只存 SHA-256 hash，并以 revoked_at、expires_at、principal.disabled 联合判定 active。",
+    "在 InMemoryStore 单一 authority mutex 与 PgStore 单一 SQL transaction 中原子提交 create/add/revoke/disable 及 durable event；event insert 失败整体回滚。"
+  ],
+  "acceptance": [
+    "Memory 与 PostgreSQL 覆盖唯一性、过期、撤销、禁用、默认零 credential。",
+    "故障注入证明 event 写失败时四类管理状态都不变。"
+  ],
+  "convergence": {"criteria": [
+    "rg -n 'service_principals|service_principal_credentials|service_principal_events' src/store.rs 命中 3 张表。",
+    "cargo test --test service_principal_store 退出码为 0。",
+    "TEST_DATABASE_URL=\"$TEST_DATABASE_URL\" cargo test --test service_principal_store -- --test-threads=1 退出码为 0。"
+  ]},
+  "status": "pending"
+}

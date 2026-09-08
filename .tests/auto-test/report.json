@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "status": "converged",
+  "iterations": 1,
+  "pass_rate": 1.0,
+  "confidence": 0.99,
+  "results": [
+    {"layer": "L0", "status": "passed", "command": "cargo test --test service_principal_store memory_"},
+    {"layer": "L1", "status": "passed", "command": "make iga-pg-test SCOPE=keystone"},
+    {"layer": "L2", "status": "passed", "command": "cargo test --test service_principal_isolation"},
+    {"layer": "L3", "status": "passed", "command": "production health/database authority checks"}
+  ],
+  "failures": []
+}

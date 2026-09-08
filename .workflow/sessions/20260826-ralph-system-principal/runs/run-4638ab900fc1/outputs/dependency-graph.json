@@ -1,0 +1,12 @@
+{
+  "_meta": {"kind": "dependency-graph", "schema": "dependency-graph/1.0", "role": "evidence"},
+  "nodes": ["TASK-001", "TASK-002", "TASK-003", "TASK-004"],
+  "edges": [
+    {"from": "TASK-001", "to": "TASK-002"},
+    {"from": "TASK-001", "to": "TASK-003"},
+    {"from": "TASK-001", "to": "TASK-004"},
+    {"from": "TASK-002", "to": "TASK-004"},
+    {"from": "TASK-003", "to": "TASK-004"}
+  ],
+  "cycles": []
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": "request-receipt/2.0",
+  "request_id": "req-goal-audit-complete-20260826-01",
+  "participant_id": "workspace-owner",
+  "payload_hash": "sha256:a57fe904c38d4e10e89de868ba4e659c0a5c9bd760716b88d58ff84c09675380",
+  "transition_receipt_ref": "receipts/transitions/000000000026-tr_71ae9e58-04f3-424a-964c-b27e6776954c.json"
+}

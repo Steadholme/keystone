@@ -1,0 +1,133 @@
+{
+  "_meta": {"kind": "findings", "schema": "findings/1.0", "role": "primary", "alias": "current-analysis"},
+  "schema_version": "findings/1.0",
+  "session_id": "20260826-ralph-system-principal",
+  "run_id": "run-7cf8b2089fb5",
+  "intent": "在 Keystone 中建立不可交互登录的 system service principal，并先创建一个默认零授权实例。",
+  "scope_verdict": "medium",
+  "summary": "采用独立 service_principals 模型；实现离线 operator lifecycle、持久 credential 生命周期与 mTLS/consumer-auth 双门 introspection；首个实例只创建 principal，不签发 credential，不创建 Verdict grant。",
+  "decisions": [
+    {
+      "id": "D1",
+      "status": "locked",
+      "title": "服务身份与人类用户结构性隔离",
+      "decision": "service principal 使用独立表与 canonical service: subject，不写入 users、session、Passkey、MFA、recovery 或 human registration outbox。",
+      "rationale": "users.email 强制存在，且无 password 只代表暂时不能登录；reset、Passkey、admin backfill 等路径仍会把该记录变成人类账户。",
+      "evidence": [
+        "src/store.rs:73",
+        "src/store.rs:2792",
+        "src/store.rs:2863",
+        "src/handlers/admin.rs:199",
+        "src/handlers/webauthn.rs:72"
+      ]
+    },
+    {
+      "id": "D2",
+      "status": "locked",
+      "title": "复用 PAT 的 credential 安全模型",
+      "decision": "service credential 使用 32-byte CSPRNG，数据库仅存 SHA-256 lookup hash，强制 expiry，保留 revoked_at，并在 principal disabled 时统一 inactive。",
+      "rationale": "PAT 已提供 Keystone 内最成熟的 opaque credential 生命周期与 fail-closed 查询模式。",
+      "evidence": [
+        "src/store.rs:580",
+        "src/store.rs:3429",
+        "src/store.rs:6243",
+        "src/store.rs:6964",
+        "src/handlers/introspect.rs:71"
+      ]
+    },
+    {
+      "id": "D3",
+      "status": "locked",
+      "title": "管理面仅允许离线 operator CLI",
+      "decision": "创建、签发、撤销、禁用不提供浏览器或公开 HTTP 管理入口；管理状态与 durable event 在同一事务提交，plaintext credential 仅能排他写入 repo 外 0600 文件。",
+      "rationale": "现有 AuditSink 可关闭且允许丢事件，不能作为权威管理审计；离线 CLI 可避免引入新的登录或 admin UI 表面。",
+      "evidence": [
+        "src/main.rs:14",
+        "src/audit.rs:68",
+        "src/audit.rs:116"
+      ]
+    },
+    {
+      "id": "D4",
+      "status": "locked",
+      "title": "内部鉴权双门且默认拒绝",
+      "decision": "introspection 仅在 INTERNAL_TLS=on 时启用，并继续要求独立 consumer Basic auth；无效、撤销、过期、disabled 统一 inactive，数据库不确定性返回 503。",
+      "rationale": "internal 路径名本身不是安全边界；生产 listener 的 mTLS 拓扑和 PAT consumer auth 应同时成立。",
+      "evidence": [
+        "src/main.rs:50",
+        "src/lib.rs:55",
+        "src/handlers/introspect.rs:41"
+      ]
+    },
+    {
+      "id": "D5",
+      "status": "locked",
+      "title": "首个 system 实例不签发 credential",
+      "decision": "本轮只创建 active principal 记录；不创建 token、scope、Verdict grant，也不挂载给任何应用。Rikune 首次调用接入时再签发独立 credential。",
+      "rationale": "当前没有消费方，提前生成共享 secret 只增加泄漏面；无 grant 的 service: subject 在 Verdict 中保持 default deny。",
+      "evidence": [
+        "/root/w33d_infra/verdict/src/policy.rs:213",
+        "/root/w33d_infra/verdict/src/policy_check.rs:146"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "area": "identity-boundary",
+      "finding": "把 system 记录放入 users 无法证明永久不可登录，并可能被 legacy migration 自动标记 verified/admin。",
+      "evidence": ["src/store.rs:2792", "src/store.rs:2863"]
+    },
+    {
+      "severity": "medium",
+      "area": "authorization",
+      "finding": "Verdict 已接受 service: subject，但 lifecycle status 仍只覆盖 user:；本阶段必须保持零 grant，service lifecycle 集成留到 Rikune 接入。",
+      "evidence": [
+        "/root/w33d_infra/verdict/src/policy.rs:213",
+        "/root/w33d_infra/verdict/src/handlers/api_v2.rs:340"
+      ]
+    },
+    {
+      "severity": "medium",
+      "area": "gateway-boundary",
+      "finding": "Strad 会把非 user: 身份强制放进 user namespace，因此当前不能把 service principal 当浏览器用户或审批人。",
+      "evidence": ["/root/w33d_infra/strad/src/auth.rs:266"]
+    },
+    {
+      "severity": "medium",
+      "area": "operations",
+      "finding": "Keystone schema 变更必须沿用 stop-old、drain、migrate/start-new 的 single-active 顺序。",
+      "evidence": ["/root/w33d_infra/deploy/README.md:390"]
+    }
+  ],
+  "intent_coverage": [
+    {"item": "没有任何登录可能", "status": "covered", "by": "独立表且不连接 human auth surface"},
+    {"item": "只能系统内部调用", "status": "covered", "by": "mTLS + consumer auth introspection；管理面仅 CLI"},
+    {"item": "先创建一个 system 账户", "status": "covered", "by": "上线后创建零授权且无 credential 的首个 principal"},
+    {"item": "每个应用以后独立账户", "status": "deferred", "by": "已写入架构规范，Rikune 集成后执行"},
+    {"item": "不能绕过权限门", "status": "covered", "by": "无 Verdict grant，不能作为 human reviewer 或审批身份"}
+  ],
+  "discussion": {
+    "rounds": 1,
+    "user_feedback": "用户明确要求先做 system 账户，并表示每应用账户留到 Rikune 集成之后。",
+    "confidence_before": 0.72,
+    "confidence_after": 0.93,
+    "pressure_pass": [
+      "无密码 user 方案因 reset、Passkey、admin backfill 与人员生命周期表面被否决。",
+      "OAuth confidential client 方案因 RP 语义及缺少 credential expiry/revoke 被否决。",
+      "共享静态环境 token 方案因无持久身份、无生命周期和弱审计被否决。"
+    ]
+  },
+  "boundary_grill": [
+    {"type": "DEC", "conflict": "service 身份语义与现有 human-only Keystone 模型冲突", "resolution": "RESOLVED：新增独立模型", "evidence": "src/store.rs:73"},
+    {"type": "MOD", "conflict": "长期方案会跨 Keystone、Verdict、Strad 与各应用", "resolution": "DEFERRED：本轮只改 Keystone 与部署", "evidence": "/root/w33d_infra/strad/src/auth.rs:266"},
+    {"type": "RSC", "conflict": "每应用独立 principal 超出当前收口", "resolution": "DEFERRED：Rikune 集成后按应用推进", "evidence": "/root/w33d_infra/strad/.workflow/specs/architecture-constraints.md"}
+  ],
+  "evidence_sources": [
+    {"kind": "cli-explore-agent", "name": "keystone_principal_model"},
+    {"kind": "cli-explore-agent", "name": "service_token_patterns"},
+    {"kind": "cli-explore-agent", "name": "principal_rollout"},
+    {"kind": "cli-delegate", "name": "run-132814-63f9"}
+  ],
+  "open_questions": []
+}

@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-142203-fq6c",
+  "startedAt": "2026-08-26T12:22:03.310Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Binary entrypoint argument handling and startup construction patterns relevant to adding a manual subcommand\\nSCOPE: src/main.rs, src/lib.rs\\nATTENTION: Rust Axum application, no clap\\nEXPECTED: file:line summary",
+    "FIND: Service principal Store method signatures and error/result types currently present\\nSCOPE: src/store.rs\\nATTENTION: Another worker may be editing this file concurrently\\nEXPECTED: exact signatures and nearby type definitions with file:line",
+    "FIND: Existing tests for filesystem permission checks, environment isolation, and CLI parsing\\nSCOPE: src/**/*.rs, tests/**/*.rs\\nEXCLUDE: target/**\\nEXPECTED: file:line list and reusable test helpers"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 832,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Binary entrypoint argument handling and startup construction patterns relevant to adding a manual subcommand\\nSCOPE: src/main.rs, src/lib.rs\\nATTENTION: Rust Axum application, no clap\\nEXPECTED: file:line summary",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 815,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Service principal Store method signatures and error/result types currently present\\nSCOPE: src/store.rs\\nATTENTION: Another worker may be editing this file concurrently\\nEXPECTED: exact signatures and nearby type definitions with file:line",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 607,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: Existing tests for filesystem permission checks, environment isolation, and CLI parsing\\nSCOPE: src/**/*.rs, tests/**/*.rs\\nEXCLUDE: target/**\\nEXPECTED: file:line list and reusable test helpers",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 590,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

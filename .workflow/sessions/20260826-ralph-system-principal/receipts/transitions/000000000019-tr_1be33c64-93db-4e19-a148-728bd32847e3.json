@@ -1,0 +1,28 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_1be33c64-93db-4e19-a148-728bd32847e3",
+  "request_id": "req-system-post-review-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 19,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 18,
+  "revision_after": 19,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "review passed with zero findings",
+  "evidence_refs": [
+    "ART-3a12319fc355b89cf514"
+  ],
+  "recorded_at": "2026-08-26T13:20:54.894Z",
+  "result": {
+    "point_id": "post-review",
+    "status": "resolved",
+    "orchestration_revision": 19,
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Decision recorded — run next may advance the chain"
+    }
+  }
+}

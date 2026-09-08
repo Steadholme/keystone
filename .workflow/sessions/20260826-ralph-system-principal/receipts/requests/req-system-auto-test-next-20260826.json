@@ -1,0 +1,7 @@
+{
+  "schema_version": "request-receipt/2.0",
+  "request_id": "req-system-auto-test-next-20260826",
+  "participant_id": "workspace-owner",
+  "payload_hash": "sha256:8483d23b791e58b6abe1350530c4724b5f84614e0deca7343de1bae3ae5fdaa3",
+  "transition_receipt_ref": "receipts/transitions/000000000020-tr_9dfa9504-b7da-43b4-934e-7a18da46d58a.json"
+}

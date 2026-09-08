@@ -1,0 +1,7 @@
+{
+  "schema_version": "request-receipt/2.0",
+  "request_id": "req-20260826-system-principal-open-v1",
+  "participant_id": "workspace-owner",
+  "payload_hash": "sha256:fd30524b934439d14db123bbe539ec1e541952cfe45e36da702e4c3e153fd36b",
+  "transition_receipt_ref": "receipts/transitions/000000000001-open-req-20260826-system-principal-open-v1.json"
+}

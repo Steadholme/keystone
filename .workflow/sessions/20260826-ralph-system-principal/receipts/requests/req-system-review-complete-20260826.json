@@ -1,0 +1,7 @@
+{
+  "schema_version": "request-receipt/2.0",
+  "request_id": "req-system-review-complete-20260826",
+  "participant_id": "workspace-owner",
+  "payload_hash": "sha256:a586a5e9d7abf99e4413437ff8857ab7917456064b15dd9bff18fe74654d8c71",
+  "transition_receipt_ref": "receipts/transitions/000000000018-tr_dff03738-66a9-4514-b246-ce1c63288013.json"
+}

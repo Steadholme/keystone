@@ -1,0 +1,21 @@
+{
+  "_meta": {
+    "kind": "change-manifest",
+    "schema": "change-manifest/1.0",
+    "role": "evidence"
+  },
+  "source_files": [
+    "README.md",
+    "src/main.rs",
+    "src/operator.rs",
+    "src/store.rs",
+    "tests/service_principal_isolation.rs",
+    "tests/service_principal_store.rs"
+  ],
+  "operational_files": [
+    "/root/w33d_infra/deploy/docker-compose.yml",
+    "/root/w33d_infra/deploy/README.md",
+    "/root/w33d_infra/tools/iga-pg-test.sh"
+  ],
+  "commit": "3f9a305a9e5a183568573dea2b24f6eb0d6b968a"
+}

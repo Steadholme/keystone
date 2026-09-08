@@ -1,0 +1,42 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_70b12383-49b0-44a3-925a-01a03c2eb3ab",
+  "request_id": "req-20260826-system-principal-next-analyze-v1",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 10,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 9,
+  "revision_after": 10,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "开始梳理现有身份、凭证、内部鉴权与部署边界",
+  "evidence_refs": [],
+  "recorded_at": "2026-08-26T11:40:37.977Z",
+  "result": {
+    "run_id": "run-7cf8b2089fb5",
+    "run_dir": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-7cf8b2089fb5",
+    "step_id": "system-analyze",
+    "status": "running",
+    "revision": 1,
+    "upstream": {},
+    "guidance": {
+      "schema_version": "guidance-snapshot/1.0",
+      "source_path": "../../.maestro/prepare/analyze.md",
+      "content_hash": "sha256:43383c3fe06087a16d9039611f57c28540af3ae8c995eeb78c0aeb328f071054",
+      "resolved_prompt_hash": "sha256:43383c3fe06087a16d9039611f57c28540af3ae8c995eeb78c0aeb328f071054",
+      "prepare_hash": "sha256:43383c3fe06087a16d9039611f57c28540af3ae8c995eeb78c0aeb328f071054",
+      "workflow_hash": "sha256:edf25c02a5e2e0cacd07714589c376d870a8efec2d461b5dc129bb47b998404f",
+      "run_mode_hash": "sha256:60752b3307697630bc7f6a07c3256100ea5b499d11cdbb38d98d49e9de2563fe"
+    },
+    "knowledge_context": {
+      "path": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-7cf8b2089fb5/knowledge-delta.json",
+      "revision": 0,
+      "candidate_count": 0
+    },
+    "brief": {
+      "command": "maestro run brief run-7cf8b2089fb5 --session 20260826-ralph-system-principal"
+    },
+    "run_already_created": true
+  }
+}

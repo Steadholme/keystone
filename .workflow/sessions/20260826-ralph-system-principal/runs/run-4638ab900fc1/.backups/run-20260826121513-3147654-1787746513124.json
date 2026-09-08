@@ -1,0 +1,27 @@
+{
+  "schema_version": "run/3.0",
+  "run_id": "run-4638ab900fc1",
+  "session_id": "20260826-ralph-system-principal",
+  "step_id": "system-plan",
+  "parent_run_id": null,
+  "retry_of_run_id": null,
+  "attempt": 1,
+  "command": "plan",
+  "args": [
+    "--session",
+    "{session}"
+  ],
+  "goal": null,
+  "status": "running",
+  "revision": 1,
+  "actor_id": "workspace-owner",
+  "input_refs": [],
+  "output_refs": [],
+  "primary_artifact_id": null,
+  "verdict": null,
+  "summary": null,
+  "created_at": "2026-08-26T11:50:40.105Z",
+  "started_at": "2026-08-26T11:50:40.106Z",
+  "ended_at": null,
+  "sealed_at": null
+}

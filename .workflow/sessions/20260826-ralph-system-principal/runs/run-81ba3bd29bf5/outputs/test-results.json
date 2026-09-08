@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "kind": "test-results",
+    "schema": "test-results/1.0",
+    "role": "primary",
+    "alias": "latest-test"
+  },
+  "verdict": "pass",
+  "scenario_count": 5,
+  "passed": 5,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "scenario_coverage": 1.0,
+  "results": [
+    {"id": "UAT-001", "status": "passed", "observed": "single candidate container is healthy with zero restarts"},
+    {"id": "UAT-002", "status": "passed", "observed": "principal/event present; human user absent; credential schema absent"},
+    {"id": "UAT-003", "status": "passed", "observed": "all authoritative Verdict counts are zero"},
+    {"id": "UAT-004", "status": "passed", "observed": "public health and OIDC issuer are correct"},
+    {"id": "UAT-005", "status": "passed", "observed": "both remote main heads equal the deployed commit"}
+  ],
+  "issues": []
+}

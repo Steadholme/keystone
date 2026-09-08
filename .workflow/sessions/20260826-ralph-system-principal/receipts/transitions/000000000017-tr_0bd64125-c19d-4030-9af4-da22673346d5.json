@@ -1,0 +1,44 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_0bd64125-c19d-4030-9af4-da22673346d5",
+  "request_id": "req-system-review-next-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 17,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 16,
+  "revision_after": 17,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "start formal review after execute decision",
+  "evidence_refs": [
+    "ART-69513c9d99415ca72aa9"
+  ],
+  "recorded_at": "2026-08-26T13:19:52.174Z",
+  "result": {
+    "run_id": "run-e2b28dfa28d4",
+    "run_dir": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-e2b28dfa28d4",
+    "step_id": "system-review",
+    "status": "running",
+    "revision": 1,
+    "upstream": {},
+    "guidance": {
+      "schema_version": "guidance-snapshot/1.0",
+      "source_path": "../../.maestro/prepare/review.md",
+      "content_hash": "sha256:3ce660787bc5076107ce9d41c533043280a25ddb2bd99d08ef7dff48777bf610",
+      "resolved_prompt_hash": "sha256:3ce660787bc5076107ce9d41c533043280a25ddb2bd99d08ef7dff48777bf610",
+      "prepare_hash": "sha256:3ce660787bc5076107ce9d41c533043280a25ddb2bd99d08ef7dff48777bf610",
+      "workflow_hash": "sha256:390fe2f7ce18156abfeb18572e5fe3a8e0825132c28d36f4ddc424f35f62f34f",
+      "run_mode_hash": "sha256:60752b3307697630bc7f6a07c3256100ea5b499d11cdbb38d98d49e9de2563fe"
+    },
+    "knowledge_context": {
+      "path": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-e2b28dfa28d4/knowledge-delta.json",
+      "revision": 0,
+      "candidate_count": 0
+    },
+    "brief": {
+      "command": "maestro run brief run-e2b28dfa28d4 --session 20260826-ralph-system-principal"
+    },
+    "run_already_created": true
+  }
+}

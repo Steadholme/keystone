@@ -1,0 +1,58 @@
+{
+  "_meta": {
+    "kind": "plan",
+    "schema": "plan/1.0",
+    "role": "primary",
+    "alias": "current-plan"
+  },
+  "objective": "在 Keystone 中实现与人类用户结构性隔离、不可交互登录、仅供内部调用的 system service principal，并以默认拒绝状态创建首个实例。",
+  "summary": "以 4 个可验收任务完成独立数据模型、离线 operator lifecycle、mTLS 与 gateway Basic 双门 introspection，以及 single-active 生产发布；首个实例不签发 credential、不创建 grant。",
+  "approach": "先建立 service_principals、service_principal_credentials 与不可变 durable events 的 Store 契约和双实现；再并行实现离线 operator CLI 与内部 introspection；最后完成测试、双远端推送、single-active 部署并创建零权限实例。",
+  "requirement_refs": [
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5"
+  ],
+  "task_ids": [
+    "TASK-001",
+    "TASK-002",
+    "TASK-003",
+    "TASK-004"
+  ],
+  "wave_ids": [
+    "WAVE-001",
+    "WAVE-002",
+    "WAVE-003"
+  ],
+  "confidence": 0.92,
+  "complexity": "high",
+  "recommended_execution": "Agent",
+  "constraints": [
+    "service principal 不写入 users、sessions、Passkey、MFA、recovery 或 human registration outbox。",
+    "credential 使用 32-byte CSPRNG；数据库只保存 SHA-256 lookup hash，必须有 expires_at、revoked_at 与 principal disabled 联合失效语义。",
+    "管理面仅为离线 operator CLI；plaintext credential 不进入 stdout、日志、仓库或数据库，只能排他写入 mode 0600 文件。",
+    "introspection 仅在 INTERNAL_TLS=on 时挂载，并继续要求 gateway HTTP Basic；无效、撤销、过期或 disabled 统一 active=false，数据库不确定性返回 503。",
+    "首个 system 实例不签发 credential、不创建 scope 或 Verdict grant，也不计入任何 human approval quorum。",
+    "PostgreSQL schema 上线必须执行 stop-old、drain、migrate/start-new 的 single-active 顺序。",
+    "每次管理状态变更与对应 durable event 必须在同一事务提交；事件写入失败时整体回滚。",
+    "迁移仅允许 additive-only；不提供 destructive down migration，回滚采用禁用 principal、撤销 credential 和恢复旧镜像。"
+  ],
+  "acceptance_criteria": [
+    "cargo test --all-targets 退出码为 0。",
+    "TEST_DATABASE_URL 指向隔离 PostgreSQL 时，service principal Store、operator 与 introspection PostgreSQL tests 退出码均为 0。",
+    "故障注入使 durable event 写入失败时，principal 创建、credential 添加、credential 撤销和 principal 禁用均不改变管理状态。",
+    "keystone service-principal create 可创建 active principal，且 users 表不存在对应记录。",
+    "未开启 INTERNAL_TLS 时 service credential introspection route 返回 404；开启后错误 Basic 返回 401，backend failure 返回 503。",
+    "INTERNAL_TLS 与 gateway Basic 双门通过后，invalid、revoked、expired、disabled credential 均返回 HTTP 200 且 JSON 为 {\"active\":false}。",
+    "首个生产 principal 的 credential 数量为 0、Verdict grant 数量为 0，且运行中 Keystone 容器在迁移期间从未超过 1 个。",
+    "main 同一 commit 已推送至 loom 与 github，并以该 commit 构建、验证和部署。"
+  ],
+  "out_of_scope": [
+    "为 Rikune 或其他应用签发 credential。",
+    "为每个应用创建独立 service principal。",
+    "修改 Strad 浏览器身份映射或 Verdict service lifecycle。",
+    "使用 system principal 绕过当前 2-of-2 人类审批。"
+  ]
+}

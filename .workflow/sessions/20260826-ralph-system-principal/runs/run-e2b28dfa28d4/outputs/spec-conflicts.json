@@ -1,0 +1,8 @@
+{
+  "_meta": {
+    "kind": "spec-conflicts",
+    "schema": "spec-conflicts/1.0",
+    "role": "evidence"
+  },
+  "conflicts": []
+}

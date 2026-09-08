@@ -1,0 +1,27 @@
+{
+  "schema_version": "knowledge-reconciliation/1.0",
+  "session_id": "20260826-ralph-system-principal",
+  "run_id": "run-bd70fc48c8a1",
+  "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "matcher_revision": "semantic-delta/1.0",
+  "generated_at": "2026-08-26T13:19:20.722Z",
+  "retrieval": {
+    "mode": "lexical-kg",
+    "embedding_used": false,
+    "candidate_limit": 28,
+    "identity_documents": 0,
+    "semantic_documents": 0,
+    "relation_documents": 0
+  },
+  "counts": {
+    "candidates": 0,
+    "unique": 0,
+    "duplicates": 0,
+    "related": 0,
+    "conflicts": 0,
+    "review_required": 0,
+    "suppressed": 0
+  },
+  "candidates": []
+}

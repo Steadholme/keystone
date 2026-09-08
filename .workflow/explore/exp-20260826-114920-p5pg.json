@@ -1,0 +1,112 @@
+{
+  "id": "exp-20260826-114920-p5pg",
+  "startedAt": "2026-08-26T09:49:20.610Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Definition and all call sites of current_session, including its validity checks and returned session data.\\nSCOPE: src/auth.rs, src/**/*.rs\\nATTENTION: Rust authentication flow; report exact file:line references.\\nEXPECTED: definition, callers, and validation summary",
+    "FIND: All comparisons or mutations involving factor_epoch on users and sessions, especially authorization-code redemption.\\nSCOPE: src/**/*.rs, tests/**/*.rs\\nATTENTION: Rust, SQLx, OIDC session invalidation semantics.\\nEXPECTED: file:line list with comparison behavior",
+    "FIND: Existing tests that invalidate or delete sessions after authentication state changes, and tests around authorize/current_session.\\nSCOPE: src/**/*.rs, tests/**/*.rs\\nATTENTION: Reuse the smallest existing Keystone test module and conventions.\\nEXPECTED: test names plus file:line and fixture pattern"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 3,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 630,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Definition and all call sites of current_session, including its validity checks and returned session data.\\nSCOPE: src/auth.rs, src/**/*.rs\\nATTENTION: Rust authentication flow; report exact file:line references.\\nEXPECTED: definition, callers, and validation summary",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 576,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: All comparisons or mutations involving factor_epoch on users and sessions, especially authorization-code redemption.\\nSCOPE: src/**/*.rs, tests/**/*.rs\\nATTENTION: Rust, SQLx, OIDC session invalidation semantics.\\nEXPECTED: file:line list with comparison behavior",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 580,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-3",
+      "prompt": "FIND: Existing tests that invalidate or delete sessions after authentication state changes, and tests around authorize/current_session.\\nSCOPE: src/**/*.rs, tests/**/*.rs\\nATTENTION: Reuse the smallest existing Keystone test module and conventions.\\nEXPECTED: test names plus file:line and fixture pattern",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 613,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

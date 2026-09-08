@@ -1,0 +1,114 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_a17c7086-8712-4534-a491-8a8827691c7f",
+  "request_id": "req-system-execute-complete-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 15,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 14,
+  "revision_after": 15,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "principal-only implementation, verification and production deployment complete",
+  "evidence_refs": [
+    "commit:3f9a305a9e5a183568573dea2b24f6eb0d6b968a",
+    "deploy:keystone-system-principal-healthy",
+    "test:isolated-pg18-keystone-pass"
+  ],
+  "recorded_at": "2026-08-26T13:19:20.724Z",
+  "result": {
+    "operation": "run-complete-and-seal",
+    "run_id": "run-bd70fc48c8a1",
+    "run_revision": 2,
+    "status": "sealed",
+    "orchestration_revision": 15,
+    "artifact_publication": {
+      "authority": "transition-receipt/2.0",
+      "artifact_registry_revision": 3,
+      "artifact_ids": [
+        "ART-32adda5a17d18f2fc61a",
+        "ART-69513c9d99415ca72aa9",
+        "ART-1ea2149c426a6d09e3f2",
+        "ART-88bfd58fa01b4c42c770"
+      ],
+      "primary_artifact_id": "ART-69513c9d99415ca72aa9",
+      "artifacts": {
+        "ART-32adda5a17d18f2fc61a": {
+          "kind": "change-manifest",
+          "role": "evidence",
+          "producer_run_id": "run-bd70fc48c8a1",
+          "relative_path": "runs/run-bd70fc48c8a1/outputs/change-manifest.json",
+          "media_type": "application/json",
+          "schema_version": "change-manifest/1.0",
+          "content_hash": "acccb2bb94e88b9c7814b6b99614b568ef8cd48419338647ab1b484e856aa992",
+          "size": 520,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-69513c9d99415ca72aa9": {
+          "kind": "artifact",
+          "role": "primary",
+          "producer_run_id": "run-bd70fc48c8a1",
+          "relative_path": "runs/run-bd70fc48c8a1/outputs/execution.json",
+          "media_type": "application/json",
+          "schema_version": "artifacts/1.0",
+          "content_hash": "902346023ed32a1fb2bbb594d395fd52eb05bacda145280a4ab351c5e4c17317",
+          "size": 1191,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-1ea2149c426a6d09e3f2": {
+          "kind": "self-check",
+          "role": "evidence",
+          "producer_run_id": "run-bd70fc48c8a1",
+          "relative_path": "runs/run-bd70fc48c8a1/outputs/self-check.json",
+          "media_type": "application/json",
+          "schema_version": "self-check/1.0",
+          "content_hash": "050c27cbe0cb41a707d697d495baf18818f8040dc85b4396639bedde213ef733",
+          "size": 515,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        },
+        "ART-88bfd58fa01b4c42c770": {
+          "kind": "task-results",
+          "role": "attachment",
+          "producer_run_id": "run-bd70fc48c8a1",
+          "relative_path": "runs/run-bd70fc48c8a1/outputs/task-results.json",
+          "media_type": "application/json",
+          "schema_version": "task-results/1.0",
+          "content_hash": "6990b04f5fd116034492befaec6e69a2e932d14ce4eceabf46d7256be98062ac",
+          "size": 1018,
+          "status": "sealed",
+          "derived_from": [],
+          "replaces": null
+        }
+      },
+      "aliases": {
+        "current-execution": "ART-69513c9d99415ca72aa9"
+      }
+    },
+    "output_warnings": [],
+    "next_step_id": "system-review",
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Run sealed; explicit run next may allocate the next chain Run"
+    },
+    "knowledge_reconciliation": {
+      "schema_version": "knowledge-reconciliation-receipt/1.0",
+      "candidate_snapshot_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "corpus_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retrieval_mode": "lexical-kg",
+      "candidates": 0,
+      "duplicates": 0,
+      "conflicts": 0,
+      "review_required": 0,
+      "suppressed": 0,
+      "review_command": "maestro knowledge review 20260826-ralph-system-principal"
+    }
+  }
+}

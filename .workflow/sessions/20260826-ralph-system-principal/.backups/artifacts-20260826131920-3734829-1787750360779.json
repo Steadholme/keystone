@@ -1,0 +1,153 @@
+{
+  "schema_version": "artifacts/1.0",
+  "revision": 2,
+  "artifacts": {
+    "ART-0ad3d9cd35fed5945a05": {
+      "kind": "findings",
+      "role": "primary",
+      "producer_run_id": "run-7cf8b2089fb5",
+      "relative_path": "runs/run-7cf8b2089fb5/outputs/findings.json",
+      "media_type": "application/json",
+      "schema_version": "findings/1.0",
+      "content_hash": "daa6eb28fc0abd8a25a094f8641736562e2ec0e30505eac04b20374d3246f3a7",
+      "size": 7109,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-1e1058fa37810e8aebc9": {
+      "kind": "risk-matrix",
+      "role": "evidence",
+      "producer_run_id": "run-7cf8b2089fb5",
+      "relative_path": "runs/run-7cf8b2089fb5/outputs/risk-matrix.json",
+      "media_type": "application/json",
+      "schema_version": "risk-matrix/1.0",
+      "content_hash": "b47a4a1e634ba368437f29bd610936cb05e46de86ff9de79b9ac19afc1ac4361",
+      "size": 1808,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-96800a74daf37c038f90": {
+      "kind": "collision-report",
+      "role": "evidence",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/collision-report.json",
+      "media_type": "application/json",
+      "schema_version": "collision-report/1.0",
+      "content_hash": "19461eb4fcd3f888676132a7507538d35599e533793588e6625b104a81df0100",
+      "size": 252,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-eab82e42b259e4d02307": {
+      "kind": "dependency-graph",
+      "role": "evidence",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/dependency-graph.json",
+      "media_type": "application/json",
+      "schema_version": "dependency-graph/1.0",
+      "content_hash": "6800b83d9d3302c0a803cd8eacc815be879ad78373410a5a7092b7d668f306c2",
+      "size": 412,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-24b7cf962e81009364f7": {
+      "kind": "plan-check",
+      "role": "evidence",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/plan-check.json",
+      "media_type": "application/json",
+      "schema_version": "plan-check/1.0",
+      "content_hash": "c1fc5fb27f23e57f8353ea2a42f8943710b391e8d63086dd3cbe29a0a29f6be5",
+      "size": 619,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-d996a129162a5822bc3a": {
+      "kind": "plan",
+      "role": "primary",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/plan.json",
+      "media_type": "application/json",
+      "schema_version": "plan/1.0",
+      "content_hash": "25e7321ee4f57704180a27a0a65b7eeed8154415c413af0e6ed9f5d958ade10b",
+      "size": 3616,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-2d818528c4b481d2531c": {
+      "kind": "plan-task",
+      "role": "attachment",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-001.json",
+      "media_type": "application/json",
+      "schema_version": "plan-task/1.0",
+      "content_hash": "6e375a0f9aa8537ff3f6a1c41607aa07f0cbd81893c33e661903041f527ac21e",
+      "size": 1600,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-2c6f4ed3a5b28cc8db8c": {
+      "kind": "plan-task",
+      "role": "attachment",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-002.json",
+      "media_type": "application/json",
+      "schema_version": "plan-task/1.0",
+      "content_hash": "d0c697db14550475866e9ed23a4f55681156068dc6c26972df4bb6f485e37074",
+      "size": 1318,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-f2915e2c70262e4e0b98": {
+      "kind": "plan-task",
+      "role": "attachment",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-003.json",
+      "media_type": "application/json",
+      "schema_version": "plan-task/1.0",
+      "content_hash": "ab38c240fb7f6428a360976ed74c8583f048490bea7bbd78a03f7acc42cade48",
+      "size": 1655,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-a4c13cc9f51cad52adfa": {
+      "kind": "plan-task",
+      "role": "attachment",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/tasks/TASK-004.json",
+      "media_type": "application/json",
+      "schema_version": "plan-task/1.0",
+      "content_hash": "98040f3de78d95d5fdc1e32aed2e61031e299373614b029b4a9faec07b275a82",
+      "size": 1961,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-ec9fad82575d437ccbba": {
+      "kind": "execution-waves",
+      "role": "attachment",
+      "producer_run_id": "run-4638ab900fc1",
+      "relative_path": "runs/run-4638ab900fc1/outputs/waves.json",
+      "media_type": "application/json",
+      "schema_version": "execution-waves/1.0",
+      "content_hash": "2e619aeb133a256f43e8ce4d98c40cda22f24d20a2a1d4a742f902a720a3df98",
+      "size": 368,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    }
+  },
+  "aliases": {
+    "current-analysis": "ART-0ad3d9cd35fed5945a05",
+    "current-plan": "ART-d996a129162a5822bc3a"
+  }
+}

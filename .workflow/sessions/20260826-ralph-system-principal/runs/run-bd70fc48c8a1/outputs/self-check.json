@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "kind": "self-check",
+    "schema": "self-check/1.0",
+    "role": "evidence"
+  },
+  "status": "passed",
+  "checks": [
+    "cargo fmt --all -- --check",
+    "cargo clippy --all-targets --locked -- -D warnings",
+    "cargo test --all-targets --locked",
+    "make iga-pg-test SCOPE=keystone",
+    "git diff --check",
+    "independent security review: zero findings",
+    "independent correctness review: zero findings",
+    "production health and single-active verification"
+  ],
+  "concerns": []
+}

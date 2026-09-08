@@ -1,0 +1,80 @@
+{
+  "id": "exp-20260826-115418-kwym",
+  "startedAt": "2026-08-26T09:54:18.283Z",
+  "cwd": "/root/w33d_infra/keystone",
+  "prompts": [
+    "FIND: Every path in authorize.rs that can call issue_code or persist an authorization code, including GET and consent POST gates.\\nSCOPE: src/handlers/authorize.rs, src/auth.rs, tests/consent_flow.rs, tests/login_flow.rs\\nATTENTION: Rust Axum OIDC; stale factor_epoch must never reach code issuance while base account sessions remain valid.\\nEXPECTED: entry-to-issue_code call graph with file:line and redirect behavior",
+    "FIND: Existing authentication gate helpers that delete invalid sessions and redirect to login while preserving authorize return_to.\\nSCOPE: src/auth.rs, src/handlers/authorize.rs, src/handlers/login.rs, tests/*.rs\\nATTENTION: Reuse current redirect and cookie conventions without changing account-session semantics.\\nEXPECTED: helper candidates and test patterns with file:line"
+  ],
+  "endpoints": [
+    "k3"
+  ],
+  "totalJobs": 2,
+  "concurrency": 4,
+  "maxTurns": 6,
+  "durationMs": 738,
+  "results": [
+    {
+      "id": "explore-1",
+      "prompt": "FIND: Every path in authorize.rs that can call issue_code or persist an authorization code, including GET and consent POST gates.\\nSCOPE: src/handlers/authorize.rs, src/auth.rs, tests/consent_flow.rs, tests/login_flow.rs\\nATTENTION: Rust Axum OIDC; stale factor_epoch must never reach code issuance while base account sessions remain valid.\\nEXPECTED: entry-to-issue_code call graph with file:line and redirect behavior",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 668,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explore-2",
+      "prompt": "FIND: Existing authentication gate helpers that delete invalid sessions and redirect to login while preserving authorize return_to.\\nSCOPE: src/auth.rs, src/handlers/authorize.rs, src/handlers/login.rs, tests/*.rs\\nATTENTION: Reuse current redirect and cookie conventions without changing account-session semantics.\\nEXPECTED: helper candidates and test patterns with file:line",
+      "endpointName": "k3",
+      "model": "k3",
+      "content": null,
+      "error": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+      "durationMs": 715,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "trace": [
+        {
+          "type": "init"
+        },
+        {
+          "type": "message",
+          "content": "LLM API error: Anthropic API 403: {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota\"},\"type\":\"error\"}",
+          "delta": false,
+          "role": "assistant"
+        },
+        {
+          "type": "result",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

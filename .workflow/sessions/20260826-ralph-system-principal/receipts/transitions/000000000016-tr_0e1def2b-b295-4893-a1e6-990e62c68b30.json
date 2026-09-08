@@ -1,0 +1,29 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_0e1def2b-b295-4893-a1e6-990e62c68b30",
+  "request_id": "req-system-post-execute-20260826",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 16,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 15,
+  "revision_after": 16,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "implementation and production evidence satisfy the narrowed principal-only release",
+  "evidence_refs": [
+    "ART-1ea2149c426a6d09e3f2",
+    "ART-69513c9d99415ca72aa9"
+  ],
+  "recorded_at": "2026-08-26T13:19:34.727Z",
+  "result": {
+    "point_id": "post-execute",
+    "status": "resolved",
+    "orchestration_revision": 16,
+    "next": {
+      "suggest_only": true,
+      "command": "maestro run next --session 20260826-ralph-system-principal",
+      "reason": "Decision recorded — run next may advance the chain"
+    }
+  }
+}

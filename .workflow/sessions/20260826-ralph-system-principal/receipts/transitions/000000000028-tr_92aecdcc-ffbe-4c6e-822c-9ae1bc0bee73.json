@@ -1,0 +1,44 @@
+{
+  "schema_version": "transition-receipt/2.0",
+  "transition_id": "tr_92aecdcc-ffbe-4c6e-822c-9ae1bc0bee73",
+  "request_id": "req-session-complete-next-20260826-01",
+  "session_id": "20260826-ralph-system-principal",
+  "activity_revision": 28,
+  "target_type": "orchestration",
+  "target_id": "20260826-ralph-system-principal",
+  "revision_before": 27,
+  "revision_after": 28,
+  "actor_id": "workspace-owner",
+  "participant_id": "workspace-owner",
+  "reason": "进入 Session 收尾阶段",
+  "evidence_refs": [
+    "ART-0803469cec90839c9d06"
+  ],
+  "recorded_at": "2026-08-26T13:27:59.031Z",
+  "result": {
+    "run_id": "run-21f4672aa4c6",
+    "run_dir": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-21f4672aa4c6",
+    "step_id": "system-session-complete",
+    "status": "running",
+    "revision": 1,
+    "upstream": {},
+    "guidance": {
+      "schema_version": "guidance-snapshot/1.0",
+      "source_path": "",
+      "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "resolved_prompt_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "prepare_hash": null,
+      "workflow_hash": null,
+      "run_mode_hash": "sha256:60752b3307697630bc7f6a07c3256100ea5b499d11cdbb38d98d49e9de2563fe"
+    },
+    "knowledge_context": {
+      "path": "/root/w33d_infra/keystone/.workflow/sessions/20260826-ralph-system-principal/runs/run-21f4672aa4c6/knowledge-delta.json",
+      "revision": 0,
+      "candidate_count": 0
+    },
+    "brief": {
+      "command": "maestro run brief run-21f4672aa4c6 --session 20260826-ralph-system-principal"
+    },
+    "run_already_created": true
+  }
+}

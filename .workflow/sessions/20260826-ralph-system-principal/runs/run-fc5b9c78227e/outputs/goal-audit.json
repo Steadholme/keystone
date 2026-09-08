@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "kind": "goal-audit",
+    "schema": "goal-audit/1.0",
+    "role": "primary",
+    "alias": "latest-goal-audit"
+  },
+  "verdict": "passed_with_deferred_scope",
+  "objective": "在 Keystone 中实现不可交互登录的 system service principal，并创建首个默认零授权实例",
+  "objective_achieved": true,
+  "criteria": [
+    {"criterion": "independent non-human principal", "status": "met", "evidence": "separate PostgreSQL tables and Store authority"},
+    {"criterion": "no email/password/Passkey/browser SSO/session/recovery", "status": "met", "evidence": "structural isolation test and production user-row absence"},
+    {"criterion": "zero credential and default deny", "status": "met", "evidence": "credential schema absent and Verdict counts zero"},
+    {"criterion": "durable auditable lifecycle", "status": "met", "evidence": "ordered atomic events and rollback tests"},
+    {"criterion": "review and tests", "status": "met", "evidence": "zero-finding reviews, full Rust, isolated PostgreSQL 18, production UAT"},
+    {"criterion": "production creation and dual push", "status": "met", "evidence": "healthy single-active deployment and equal remote heads"},
+    {"criterion": "credential issuance, rotation, and introspection", "status": "deferred", "evidence": "deliberately removed pending two-phase delivery design during Rikune integration"}
+  ],
+  "blocking_gaps": [],
+  "deferred_follow_up": [
+    "During Rikune integration, design per-application principals and pending -> secure deliver -> active credentials with bounded rotation and auditable introspection."
+  ]
+}

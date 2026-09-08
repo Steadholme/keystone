@@ -1,0 +1,33 @@
+{
+  "schema_version": "run/3.0",
+  "run_id": "run-81ba3bd29bf5",
+  "session_id": "20260826-ralph-system-principal",
+  "step_id": "system-test",
+  "parent_run_id": null,
+  "retry_of_run_id": null,
+  "attempt": 1,
+  "command": "test",
+  "args": [
+    "--session",
+    "{session}"
+  ],
+  "goal": null,
+  "status": "sealed",
+  "revision": 2,
+  "actor_id": "workspace-owner",
+  "input_refs": [],
+  "output_refs": [
+    "ART-af8aea3e6fac6ab27df2",
+    "ART-6152b0c04e94960eb4d1",
+    "ART-3f70a2f0a3a160f2f363",
+    "ART-32ce77d2a0c96b14f3fe",
+    "ART-1373d67a5a66f8f4f8bd"
+  ],
+  "primary_artifact_id": "ART-32ce77d2a0c96b14f3fe",
+  "verdict": "done",
+  "summary": "生产验收 5/5 通过",
+  "created_at": "2026-08-26T13:22:20.450Z",
+  "started_at": "2026-08-26T13:22:20.451Z",
+  "ended_at": "2026-08-26T13:24:13.679Z",
+  "sealed_at": "2026-08-26T13:24:13.679Z"
+}
