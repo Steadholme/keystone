@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>Account · Steadholme</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -39,10 +39,10 @@
   <main class="console">
     <div class="console__head">
       <h1>Account</h1>
-      <p class="muted">Manage your identity and security for this keep.</p>
     </div>
 
-    <div class="card-stack">
+    <div class="ledger-2col">
+      <div class="ledger-2col__col">
       <!-- Identity -->
       <section class="card">
         <div class="card__head"><h2>Identity</h2></div>
@@ -95,36 +95,7 @@
             {{TOTP_CONTROLS}}
           </div>
         </div>
-        <div class="card__note">You are signed in to <code>{{SUB}}</code>. Sessions end automatically after inactivity or when you log out.</div>
-      </section>
-
-      <!-- Active sessions -->
-      <section class="card">
-        <div class="card__head">
-          <h2>Active sessions</h2>
-          <span class="badge">{{SESSION_COUNT}} active</span>
-        </div>
-        <div class="card__body">
-          <p class="muted">Devices currently signed in to your account. End any you don't recognize.</p>
-          <div class="session-list">
-            {{SESSIONS}}
-          </div>
-          {{REVOKE_ALL}}
-        </div>
-        <div class="card__note">Ending a session signs that device out of single sign-on. Access it already holds to apps may persist until those sessions expire (up to 8 hours).</div>
-      </section>
-
-      <!-- Login history -->
-      <section class="card">
-        <div class="card__head">
-          <h2>Login history</h2>
-          <span class="pill">Latest 10</span>
-        </div>
-        <div class="card__body">
-          <div class="history-list">
-            {{LOGIN_EVENTS}}
-          </div>
-        </div>
+        <div class="card__note">Sessions end after 8 h of inactivity.</div>
       </section>
 
       <!-- Personal access tokens -->
@@ -182,6 +153,37 @@
           </form>
         </div>
       </section>
+      </div>
+      <div class="ledger-2col__col">
+
+      <!-- Active sessions -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Active sessions</h2>
+          <span class="badge">{{SESSION_COUNT}} active</span>
+        </div>
+        <div class="card__body">
+          <div class="session-list">
+            {{SESSIONS}}
+          </div>
+          {{REVOKE_ALL}}
+        </div>
+        <div class="card__note">App sessions already issued persist up to 8 h after a sign-out here.</div>
+      </section>
+
+      <!-- Login history -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Login history</h2>
+          <span class="pill">Latest 10</span>
+        </div>
+        <div class="card__body">
+          <div class="history-list">
+            {{LOGIN_EVENTS}}
+          </div>
+        </div>
+      </section>
+      </div>
     </div>
   </main>
   <script src="/static/login.js"></script>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>Admin · Steadholme</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -40,7 +40,6 @@
   <main class="console">
     <div class="console__head">
       <h1>Admin console</h1>
-      <p class="muted">Manage the keep's users and registered OAuth clients.</p>
     </div>
 
     <div class="card-stack">
@@ -76,7 +75,7 @@
             </table>
           </div>
         </div>
-        <div class="card__note">Disabling a user blocks new sign-ins immediately; revoke their sessions to end access they already hold. Reset links are single-use and expire in one hour.</div>
+        <div class="card__note">Disabling blocks new sign-ins only. Reset links are single-use and expire in 1 h.</div>
       </section>
 
       <!-- OAuth clients (read-only) -->
